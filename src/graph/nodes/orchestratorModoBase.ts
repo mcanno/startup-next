@@ -1,0 +1,120 @@
+// Modo base del orquestador (diseno_startup_next.md, sección 8): cuando
+// ontology-engine no tiene hechos reales de la startup, el orquestador no
+// puede razonar contra hallazgos concretos — cae a preguntarle al TBox en
+// abstracto ("¿qué precede metodológicamente a esta tarea?") vía
+// GET /concepts/{id}/prerequisitos, ya confirmado funcionando en el paso 1
+// de esta secuencia.
+//
+// Vive separado de orchestrator.ts porque la detección de modo y la
+// segunda llamada LLM de este archivo son un concern propio, no el flujo
+// principal de decidir accion_next.
+
+import { getChatModel, getModoBaseModelConfig } from "../../config/models.js";
+import {
+  getPrerequisitos,
+  getStartupGraph,
+  toHallazgosOntologia,
+  validateStartup,
+  type Prerequisito,
+} from "../../lib/ontologyEngine.js";
+import { invokeStructured } from "../../lib/structuredOutputRetry.js";
+import {
+  modoBaseConflictoSchema,
+  type ComentarioAsesor,
+  type EspecialistaRole,
+  type HallazgoOntologia,
+} from "../../schemas.js";
+
+export type OntologyContext = { mode: "enriquecido"; hallazgos: HallazgoOntologia[] } | { mode: "base" };
+
+// Solo 3 de los 7 roles tienen ancla en el TBox hoy (investigación del
+// paso 1): mvp y modelo_negocio son match directo, escalado es una
+// aproximación ya señalada como tal. Los otros 4 quedan sin mapear a
+// propósito — GET /concepts/{id}/prerequisitos ya devuelve [] con gracia
+// para un concept_id que no existe, así que no hace falta manejarlos como
+// caso especial acá.
+const ESPECIALISTA_A_CONCEPTO: Partial<Record<EspecialistaRole, string>> = {
+  mvp: "MVP",
+  modelo_negocio: "BusinessModelCanvas",
+  escalado: "EngineOfGrowth",
+};
+
+// GET /startups/{id}/graph antes que validate(): individuals.length > 0 es
+// la única señal confiable de "hay hechos reales" (validate() sobre una
+// startup sin individuos también devuelve hallazgos: [] en las 4 reglas —
+// indistinguible de una startup real que cumple todo, ver lib/ontologyEngine.ts).
+// Cualquier error de red/timeout cae a modo base, igual que el catch que ya
+// existía en fetchHallazgosOntologia.
+export async function resolveOntologyContext(startupId: string): Promise<OntologyContext> {
+  try {
+    const graph = await getStartupGraph(startupId);
+    if (graph.individuals.length > 0) {
+      const report = await validateStartup(startupId);
+      return { mode: "enriquecido", hallazgos: toHallazgosOntologia(report) };
+    }
+  } catch {
+    // ontology-engine caído o startup_id inválido: modo base igual.
+  }
+  return { mode: "base" };
+}
+
+export async function getPrerequisitosParaEspecialista(especialista: EspecialistaRole): Promise<Prerequisito[]> {
+  const conceptId = ESPECIALISTA_A_CONCEPTO[especialista];
+  if (!conceptId) return [];
+  return getPrerequisitos(conceptId);
+}
+
+// Reusa hallazgos_ontologia con un rule_id sintético en vez de sumar un
+// campo nuevo al contrato (decisión confirmada, sección 8) — un solo
+// hallazgo que junta todos los prerrequisitos, mismo patrón de join que ya
+// usa toHallazgosOntologia para los hallazgos reales de una regla.
+export function buildHallazgosPrerequisitoGenerico(prerequisitos: Prerequisito[]): HallazgoOntologia[] {
+  if (prerequisitos.length === 0) return [];
+  const detalle = prerequisitos
+    .map((p) => `${p.concept_id} precede metodológicamente a esta tarea (vía ${p.relacion}, distancia ${p.distancia})`)
+    .join("; ");
+  return [{ rule_id: "PREREQUISITO_GENERICO", hallazgos: detalle }];
+}
+
+const MODO_BASE_SYSTEM_PROMPT = `Estás evaluando, en modo base (sin hechos reales de ninguna startup), si el comentario de un asesor humano podría no alinear con los prerrequisitos metodológicos genéricos de la tarea elegida — según la ontología Lean Startup, en abstracto.
+
+No estás verificando contra el estado real de una startup (no lo hay). Esto es solo información para que el fundador/asesor reconcilien con lo que saben de su situación real — nunca un bloqueo. Si el comentario del asesor no contradice ni ignora los prerrequisitos listados, o si no hay tensión real, marcá conflicto_detectado=false. Marcalo true solo si el comentario sugiere saltear o ignorar explícitamente algo que la metodología presupone como paso previo.`;
+
+function buildModoBaseUserPrompt(
+  accion: { titulo: string; descripcion: string },
+  comentario: ComentarioAsesor,
+  prerequisitos: Prerequisito[],
+): string {
+  return [
+    `Tarea elegida: "${accion.titulo}" — ${accion.descripcion}`,
+    "",
+    `Comentario del asesor: "${comentario.texto}"`,
+    "",
+    "Prerrequisitos metodológicos genéricos de esta tarea (según el TBox, no hechos de esta startup):",
+    prerequisitos.map((p) => `- ${p.concept_id} (vía ${p.relacion}, distancia ${p.distancia})`).join("\n"),
+  ].join("\n");
+}
+
+// Solo se llama cuando ya hay algo concreto que comparar (comentario del
+// asesor Y al menos un prerrequisito) — si falta cualquiera de los dos, no
+// hay tensión posible que evaluar y no vale la pena el costo de una
+// llamada LLM para devolver conflicto_detectado=false igual.
+export async function evaluarConflictoModoBase(
+  accion: { titulo: string; descripcion: string },
+  comentario: ComentarioAsesor,
+  prerequisitos: Prerequisito[],
+): Promise<{ detectado: boolean; descripcion: string }> {
+  const llm = getChatModel(getModoBaseModelConfig(), { maxTokens: 512, effort: "low" }).withStructuredOutput(
+    modoBaseConflictoSchema,
+    { name: "evaluar_conflicto_modo_base" },
+  );
+
+  const decision = await invokeStructured(() =>
+    llm.invoke([
+      { role: "system", content: MODO_BASE_SYSTEM_PROMPT },
+      { role: "user", content: buildModoBaseUserPrompt(accion, comentario, prerequisitos) },
+    ]),
+  );
+
+  return { detectado: decision.conflicto_detectado, descripcion: decision.conflicto_descripcion ?? "" };
+}

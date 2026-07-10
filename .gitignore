@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env.local
+.env
+*.tsbuildinfo
+
+# rag-ingest: salidas de prueba locales (.jsonl, artefactos de MinerU) —
+# el resultado real vive en rag_chunks (Neon), no en git.
+rag-ingest/out/
+rag-ingest/sources/
