@@ -1,33 +1,128 @@
-// Capa de robustez permanente para las tres llamadas .withStructuredOutput()
-// del grafo (orchestrator/specialist/validator): Claude puede, de forma
-// intermitente, devolver un tool call que no cumple el schema (ver bug real
-// encontrado en specialist.ts con el corpus real: resumen_estrategia
-// ausente del tool call pese a ser obligatorio) — no es específico de un
-// nodo ni de un schema, así que se resuelve una sola vez acá.
+// Capa de robustez permanente para las cinco llamadas .withStructuredOutput()
+// del grafo (orchestrator/orchestratorModoBase/specialist/validator/informes
+// parse): Claude puede, de forma intermitente, devolver un tool call que no
+// cumple el schema (ver bug real encontrado en specialist.ts con el corpus
+// real: resumen_estrategia ausente del tool call pese a ser obligatorio) —
+// no es específico de un nodo ni de un schema, así que se resuelve una sola
+// vez acá.
 //
-// Solo reintenta OutputParserException (lc_error_code "OUTPUT_PARSING_FAILURE")
-// — cualquier otro error (auth, red, rate limit) se propaga de inmediato:
-// reintentarlos a ciegas escondería fallas reales en vez de una
-// inconsistencia puntual del modelo.
+// Reparación determinística antes de reintentar (investigación real, sesión
+// de startup-next-ui): agregar un segundo campo de nivel superior
+// (resumen_estrategia, Hito 3) no alcanza para evitar que un campo
+// array-de-objetos se emita como un string con el JSON completo adentro en
+// vez de como array nativo — medido ~6% por llamada en 32 corridas reales
+// contra specialistDecisionSchema, con stop_reason "tool_use" (no es
+// truncamiento por maxTokens). En ese caso el contenido serializado suele
+// ser JSON válido y completo: JSON.parse() sobre el/los campo(s) que Zod
+// señala como mal tipados, seguido de una re-validación, recupera el
+// resultado sin gastar una llamada nueva al modelo. Solo se reintenta con
+// una llamada nueva si la reparación también falla.
 
-import { OutputParserException } from "@langchain/core/output_parsers";
+import type { z } from "zod";
 
 const MAX_ATTEMPTS = 3;
 
-function isOutputParsingFailure(err: unknown): boolean {
-  if (err instanceof OutputParserException) return true;
-  return (err as { lc_error_code?: string } | null)?.lc_error_code === "OUTPUT_PARSING_FAILURE";
+type StructuredCallResult<T> = {
+  raw: unknown;
+  parsed: T | null;
+  parsingError?: Error;
+};
+
+function extractToolArgs(raw: unknown): Record<string, unknown> | undefined {
+  const message = raw as
+    | { tool_calls?: Array<{ args?: Record<string, unknown> }> }
+    | null
+    | undefined;
+  return message?.tool_calls?.[0]?.args;
 }
 
-export async function invokeStructured<T>(call: () => Promise<T>): Promise<T> {
-  let lastErr: unknown;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+// Repara únicamente los campos que Zod señaló como inválidos (vía
+// error.issues), no cualquier string del objeto al azar — evita tocar
+// campos que legítimamente son texto libre y que por coincidencia
+// parseen como JSON.
+function attemptRepair<T>(
+  schema: z.ZodType<T>,
+  args: Record<string, unknown>,
+): { data: T; repairedFields: string[] } | null {
+  const firstPass = schema.safeParse(args);
+  if (firstPass.success) return null; // no hacía falta reparar nada
+
+  const repaired: Record<string, unknown> = { ...args };
+  const repairedFields: string[] = [];
+  const brokenKeys = new Set(
+    firstPass.error.issues
+      .map((issue) => issue.path[0])
+      .filter((key): key is string => typeof key === "string"),
+  );
+
+  for (const key of brokenKeys) {
+    const value = repaired[key];
+    if (typeof value !== "string") continue;
     try {
-      return await call();
-    } catch (err) {
-      if (!isOutputParsingFailure(err) || attempt === MAX_ATTEMPTS) throw err;
-      lastErr = err;
+      repaired[key] = JSON.parse(value);
+      repairedFields.push(key);
+    } catch {
+      continue; // no era JSON valido, no se puede reparar este campo
     }
   }
+  if (repairedFields.length === 0) return null;
+
+  const secondPass = schema.safeParse(repaired);
+  if (!secondPass.success) return null;
+  return { data: secondPass.data, repairedFields };
+}
+
+// LangChain no siempre popula parsingError cuando parsed es null (visto en
+// vivo: args con recomendaciones como string con JSON invalido/truncado, no
+// reparable con JSON.parse — ver comentario de arriba). Sin esto, el error
+// guardado en la fila del run era un mensaje genérico sin ningún detalle,
+// forzando a levantar un script de debug aparte cada vez para saber qué pasó
+// realmente.
+function buildDiagnosticError<T>(
+  schemaName: string,
+  parsingError: Error | undefined,
+  schema: z.ZodType<T>,
+  args: Record<string, unknown> | undefined,
+): Error {
+  if (parsingError) return parsingError;
+  if (!args) return new Error(`structured output: sin tool_calls en la respuesta (schema="${schemaName}")`);
+
+  const zodResult = schema.safeParse(args);
+  if (zodResult.success) return new Error(`structured output: fallo inesperado sin issues (schema="${schemaName}")`);
+
+  const issues = zodResult.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+  return new Error(`structured output inválido (schema="${schemaName}"): ${issues}`);
+}
+
+export async function invokeStructured<T>(
+  schema: z.ZodType<T>,
+  schemaName: string,
+  call: () => Promise<StructuredCallResult<T>>,
+): Promise<T> {
+  let lastErr: Error = new Error(`structured output parsing failed sin detalle (schema="${schemaName}")`);
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const result = await call();
+    if (result.parsed !== null) return result.parsed;
+
+    const args = extractToolArgs(result.raw);
+    if (args) {
+      const repair = attemptRepair(schema, args);
+      if (repair) {
+        // Reparación exitosa: distinto de un éxito normal a propósito, para
+        // poder medir con datos reales de producción qué tan seguido pasa
+        // esto (la medición de ~6% de hoy fue con prompts sintéticos, no con
+        // el accion_next real armado por el orquestador).
+        console.warn(
+          `structured output reparado sin reintento: schema="${schemaName}" campos=[${repair.repairedFields.join(", ")}]`,
+        );
+        return repair.data;
+      }
+    }
+
+    lastErr = buildDiagnosticError(schemaName, result.parsingError, schema, args);
+    if (attempt === MAX_ATTEMPTS) throw lastErr;
+  }
+
   throw lastErr;
 }

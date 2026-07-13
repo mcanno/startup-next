@@ -15,10 +15,10 @@ Reglas:
 export async function extractOpcionesDesdeTexto(texto: string): Promise<OpcionPropuesta[]> {
   const llm = getChatModel(getInformesParseModelConfig(), { maxTokens: 2048, effort: "medium" }).withStructuredOutput(
     informeParseDecisionSchema,
-    { name: "extraer_opciones" },
+    { name: "extraer_opciones", includeRaw: true },
   );
 
-  const decision = await invokeStructured(() =>
+  const decision = await invokeStructured(informeParseDecisionSchema, "informeParseDecisionSchema", () =>
     llm.invoke([
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: texto },

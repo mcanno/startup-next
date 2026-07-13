@@ -79,12 +79,12 @@ export async function validatorNode(state: StartupNextStateType): Promise<Partia
 
   const llm = getChatModel(getValidatorModelConfig(), { maxTokens: 1024, effort: "low" }).withStructuredOutput(
     validatorDecisionSchema,
-    { name: "evaluar_ciclo" },
+    { name: "evaluar_ciclo", includeRaw: true },
   );
 
   const hallazgosOntologia = await fetchHallazgosOntologia(state.startupId);
 
-  const decision = await invokeStructured(() =>
+  const decision = await invokeStructured(validatorDecisionSchema, "validatorDecisionSchema", () =>
     llm.invoke([
       { role: "system", content: SYSTEM_PROMPT },
       {

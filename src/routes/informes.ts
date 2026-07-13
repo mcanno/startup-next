@@ -4,6 +4,7 @@ import { z } from "zod";
 import { buildOpcionDesdeTextoLibre, extractOpcionesDesdeTexto } from "../informes/parseOpciones.js";
 import { authenticate } from "../lib/auth.js";
 import { extractTextFromPdf } from "../lib/pdfParser.js";
+import { resolveStartupIdFromPdfText } from "../lib/pdfVerification.js";
 
 const textoLibreBodySchema = z.object({
   texto_libre: z.string().min(1),
@@ -29,8 +30,9 @@ export async function informesRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: "no se pudo extraer texto del PDF" });
       }
 
+      const startupId = resolveStartupIdFromPdfText(texto);
       const opciones = await extractOpcionesDesdeTexto(texto);
-      return reply.code(200).send({ opciones_propuestas: opciones });
+      return reply.code(200).send({ opciones_propuestas: opciones, startup_id: startupId });
     }
 
     const parsed = textoLibreBodySchema.safeParse(req.body);
@@ -38,7 +40,9 @@ export async function informesRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: "invalid request body", details: parsed.error.issues });
     }
 
+    // Texto libre nunca tiene id que extraer -- siempre modo base con UUID
+    // generado (seccion 9).
     const opcion = buildOpcionDesdeTextoLibre(parsed.data.texto_libre);
-    return reply.code(200).send({ opciones_propuestas: [opcion] });
+    return reply.code(200).send({ opciones_propuestas: [opcion], startup_id: crypto.randomUUID() });
   });
 }

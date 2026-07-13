@@ -52,7 +52,7 @@ export async function runMvpSpecialist(
 
   const llm = getChatModel(getSpecialistModelConfig(), { maxTokens: 2048, effort: "medium" }).withStructuredOutput(
     specialistDecisionSchema,
-    { name: "generar_borrador" },
+    { name: "generar_borrador", includeRaw: true },
   );
 
   const userContent = [
@@ -68,7 +68,7 @@ export async function runMvpSpecialist(
     .filter(Boolean)
     .join("\n");
 
-  const decision = await invokeStructured(() =>
+  const decision = await invokeStructured(specialistDecisionSchema, "specialistDecisionSchema", () =>
     llm.invoke([
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userContent },

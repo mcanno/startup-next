@@ -106,10 +106,10 @@ export async function evaluarConflictoModoBase(
 ): Promise<{ detectado: boolean; descripcion: string }> {
   const llm = getChatModel(getModoBaseModelConfig(), { maxTokens: 512, effort: "low" }).withStructuredOutput(
     modoBaseConflictoSchema,
-    { name: "evaluar_conflicto_modo_base" },
+    { name: "evaluar_conflicto_modo_base", includeRaw: true },
   );
 
-  const decision = await invokeStructured(() =>
+  const decision = await invokeStructured(modoBaseConflictoSchema, "modoBaseConflictoSchema", () =>
     llm.invoke([
       { role: "system", content: MODO_BASE_SYSTEM_PROMPT },
       { role: "user", content: buildModoBaseUserPrompt(accion, comentario, prerequisitos) },

@@ -185,14 +185,14 @@ export async function orchestratorNode(
 
   const llm = getChatModel(getOrchestratorModelConfig(), { maxTokens: 2048, effort: "medium" }).withStructuredOutput(
     orchestratorDecisionSchema,
-    { name: "decidir_accion_next" },
+    { name: "decidir_accion_next", includeRaw: true },
   );
 
   const intercambios: string[] = [];
 
   for (;;) {
     const forzarDecision = intercambios.length >= state.maxClarifications;
-    const decision = await invokeStructured(() =>
+    const decision = await invokeStructured(orchestratorDecisionSchema, "orchestratorDecisionSchema", () =>
       llm.invoke([
         { role: "system", content: SYSTEM_PROMPT },
         {
