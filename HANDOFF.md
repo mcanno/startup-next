@@ -1,12 +1,41 @@
 # HANDOFF — startup-next (backend)
 
-Última actualización: 2026-07-11.
+Última actualización: 2026-07-14.
 
 ## Módulo recién completado: verificación de firma del PDF + capa de reparación de structured output
 
-Ambos, implementados y probados con datos reales (no mocks), pendientes de commit.
+Ambos, implementados y probados con datos reales (no mocks). Commiteado y pusheado a `origin/master` (commit `6c61384`).
 
-**Estado: funcional, verificado end-to-end, sin commitear todavía.**
+**Estado: funcional, verificado end-to-end, commiteado y pusheado.**
+
+## Entorno local verificado end-to-end (2026-07-14, sesión de pruebas)
+
+Siguiendo `handoff_entorno_pruebas_local.md` (traspaso de otra sesión, ver punto 3 de pendientes más abajo): se levantaron los tres componentes en local y se corrió el checklist completo de pruebas de humo contra la app web real, no solo por curl aislado.
+
+**Servicios corridos**: `ontology-engine` en `localhost:8001` (contra la Neon **compartida** de `startup-advisor`, exportando `DATABASE_URL` a mano en la shell — no lee `.env.local`, ver discrepancia abajo), `startup-next` en `localhost:8000` (contra su Neon **aislada**), `startup-next-ui` en `localhost:3000`. Los tres con dependencias ya instaladas de una sesión anterior (`node_modules`/`venv` presentes), `.env.local` ya poblados en los tres repos.
+
+**Discrepancias reales encontradas contra `handoff_entorno_pruebas_local.md`** (no asumir esos datos en la próxima sesión sin volver a confirmar):
+- `startup-next/.env.local` tenía `ONTOLOGY_ENGINE_URL=https://ontology-engine.fly.dev` (producción), no localhost. Se corrigió a `http://localhost:8001` solo en el archivo local (no commiteado).
+- `ontology-engine` no usa `dotenv` (`main.py` lee `os.environ` directo) — no alcanza con crear un `.env.local` ahí, hay que exportar `DATABASE_URL` en la shell donde se lo levanta.
+- `startup-next-ui/.env.example` usa `STARTUP_NEXT_URL`, no `BACKEND_URL` como asumía el traspaso, y no tiene ninguna variable `DATABASE_URL` propia (no la necesita, solo llama al backend).
+- `ontology-engine` no usa Clerk ni ninguna otra auth (confirmado por grep, `requirements.txt`, `Dockerfile`, `fly.toml`) — Clerk es específico de `startup-advisor` (el Next.js principal), no de la subcarpeta.
+- El comando de arranque local sí era `uvicorn main:app --reload --port 8000` como se asumía, confirmado en `PHASE1_CLOSE.md`, pero **se usó el puerto 8001 en la práctica** para no chocar con `startup-next` (ambos usan 8000 por defecto).
+
+**Checklist de pruebas de humo (Paso 5 del traspaso) — los 6 casos confirmados**:
+1. Texto libre → modo base: `approved`, `hallazgos_ontologia` vía `PREREQUISITO_GENERICO`. OK.
+2. PDF firmado real (subido por el usuario vía la UI, exportado de verdad por `startup-advisor`) → mismo `startup_id` extraído en dos subidas distintas del mismo PDF, confirma que la firma se verifica de verdad (si fallara, cada subida daría un UUID aleatorio distinto). Modo enriquecido no se pudo ejercitar (ese `startup_id` tiene 0 individuals en `ontology-engine` — bloqueado por el punto 4 de pendientes).
+3. PDF sin marcador de firma → degrada a UUID aleatorio, `200 OK`, sin error. OK (probado con un PDF sintético generado ad hoc, sin necesidad de reusar uno real).
+4. Entrada incoherente (una factura) → `status: "peticion_incoherente"`, `ciclos_intentados: 0`. OK.
+5. `especialista_requerido` distinto de `mvp` (probado con `financiacion`) → `status: "sin_especialista"`, `especialista_disponible: false`, 0 ciclos gastados. OK.
+6. Panel admin: alta/baja de `allowed_emails` y los 401 cruzados (`API_KEY_ADMIN` contra endpoint que espera `API_KEY_APP` y viceversa) — todos verificados por API directa. OK.
+
+**Hallazgo real nuevo, no en el checklist original**: en la primera corrida real vía la UI (PDF firmado), el especialista MVP falló tras agotar los 3 reintentos — `resumen_estrategia` vino ausente del tool call (no mal tipado, directamente ausente) y `recomendaciones` llegó como string. La capa de reparación no lo cubre porque solo repara campos presentes pero mal tipados, no campos ausentes. Es el mismo problema ya documentado más abajo (sección "Capa de reparación..."), pero esta es la primera confirmación real fuera de las mediciones sintéticas — y salió peor que el caso ya conocido (dos campos fallando a la vez, uno de ellos ausente). Al reintentar con el mismo PDF, la segunda corrida sí funcionó (`approved`).
+
+**Hallazgo secundario**: `GET /runs/:id` no expone el campo `error` que sí se guarda en `next_action_runs.error` cuando un run termina en `failed` (ver `serializeRun()` en `src/routes/runs.ts`). Para diagnosticar el fallo de arriba hubo que consultar la fila directo en Postgres — vale la pena considerar exponerlo en la respuesta cuando `status === "failed"`.
+
+**Estado de git**: sin cambios nuevos de esta sesión de pruebas (no se tocó lógica de negocio, tal como pedía el traspaso). El trabajo pendiente del "Paso 0" del traspaso (firma + capa de reparación) ya estaba commiteado y pusheado desde antes de esta sesión (commit `6c61384`, ver arriba) — confirmado con `git status`/`git log` antes de arrancar nada.
+
+**¿Listo para diseñar la interfaz Hermes?** Sí, con una salvedad: el entorno de los tres componentes está verificado y estable, login por magic link confirmado funcionando (la prueba de PDF se hizo autenticado vía `SUPERADMIN_EMAIL`). Lo único que sigue bloqueado es lo ya conocido — `POST /startups/{id}/individuals` con 500 (impide probar el modo enriquecido de extremo a extremo) y la fiabilidad del especialista MVP bajo carga real, no algo que deba resolverse antes de arrancar el diseño de Hermes.
 
 ## Decisiones técnicas y de arquitectura
 
@@ -36,14 +65,15 @@ Ambos, implementados y probados con datos reales (no mocks), pendientes de commi
 
 ## Problemas conocidos / pendientes
 
-1. **Nada de lo de hoy está commiteado todavía.** Rama `master`, último commit pusheado es `27fbbbc`.
-2. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real.
-3. `informeParseDecisionSchema` tiene la misma forma de riesgo (array de objetos) que `specialistDecisionSchema` pero no se lo vio fallar hoy — ya tiene la capa de reparación aplicada preventivamente, sin confirmar si hacía falta.
-4. Un archivo `handoff_startup_next_v2.md` apareció sin trackear en este y otros dos repos — origen desconocido, no se tocó.
+1. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real. Confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba): la primera corrida real vía UI falló así, la segunda con el mismo PDF funcionó.
+2. `informeParseDecisionSchema` tiene la misma forma de riesgo (array de objetos) que `specialistDecisionSchema` pero no se lo vio fallar hoy — ya tiene la capa de reparación aplicada preventivamente, sin confirmar si hacía falta.
+3. `handoff_startup_next_v2.md` y `handoff_entorno_pruebas_local.md` siguen sin trackear en este y otros repos — ambos son documentos de traspaso generados a propósito al cierre de sesiones anteriores, pensados para copiarse a las carpetas de trabajo al inicio de una sesión nueva. No se commitean (no son código); `handoff_startup_next_v2.md` contiene pendientes adicionales no reflejados aquí (Hermes en suspenso, entrevista de `startup-advisor` terminando abruptamente, excepción de Avast pendiente).
+4. `GET /runs/:id` no expone el campo `error` guardado en `next_action_runs.error` cuando `status === "failed"` (`serializeRun()` en `src/routes/runs.ts`) — hoy hace falta consultar Postgres directo para diagnosticar un run fallido. Candidato simple a agregar.
 
 ## Próximos pasos sugeridos
 
-1. Commitear el trabajo de hoy (repair layer + verificación de firma) y pushear.
-2. Dejar correr el sistema un tiempo real y revisar los logs de reparación/fallo del especialista para confirmar o descartar la tensión del ~6% vs. producción real.
-3. Considerar si otros especialistas (`financiacion`, `modelo_negocio`, `escalado`, `organizacion`, `administracion` — hoy todos caen en `sin_especialista`) son el próximo módulo a construir, siguiendo el patrón ya probado de `specialist/mvp.ts`.
-4. El endpoint `POST /startups/{id}/individuals` de `ontology-engine` devuelve `500` sin detalle (encontrado hoy, no investigado — se evitó usándolo, se usó un `startup_id` ya poblado de antes). Vale la pena mirarlo si se necesita crear datos de ontología de prueba por API.
+1. Dejar correr el sistema un tiempo real y revisar los logs de reparación/fallo del especialista para confirmar o descartar la tensión del ~6% vs. producción real.
+2. Considerar si otros especialistas (`financiacion`, `modelo_negocio`, `escalado`, `organizacion`, `administracion` — hoy todos caen en `sin_especialista`) son el próximo módulo a construir, siguiendo el patrón ya probado de `specialist/mvp.ts`.
+3. El endpoint `POST /startups/{id}/individuals` de `ontology-engine` devuelve `500` sin detalle (encontrado el 2026-07-11, no investigado — se evitó usándolo, se usó un `startup_id` ya poblado de antes). Sigue bloqueando probar el modo enriquecido de extremo a extremo. Vale la pena mirarlo si se necesita crear datos de ontología de prueba por API.
+4. Diseñar la interfaz para que Hermes invoque `startup-next` (objetivo final del proyecto según `handoff_entorno_pruebas_local.md`) — el entorno de los tres componentes ya quedó verificado y estable para arrancar esto.
+5. Exponer `error` en la respuesta de `GET /runs/:id` cuando `status === "failed"` (ver pendiente 4 arriba).
