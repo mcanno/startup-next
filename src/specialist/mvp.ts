@@ -15,13 +15,13 @@ import { specialistDecisionSchema, type AccionNext, type Borrador, type Validaci
 
 const ESPECIALISTA = "mvp";
 
-const SYSTEM_PROMPT = `Sos el especialista de MVP de Startup-Next. Tu trabajo es generar recomendaciones concretas y accionables para la acción prioritaria que te asignó el orquestador, fundamentadas en los fragmentos recuperados de los libros base (Business Model Canvas, Customer Development, Lean Startup).
+const SYSTEM_PROMPT = `Eres el especialista de MVP de Startup-Next. Tu trabajo es generar recomendaciones concretas y accionables para la acción prioritaria que te asignó el orquestador, fundamentadas en los fragmentos recuperados de los libros base (Business Model Canvas, Customer Development, Lean Startup).
 
 Reglas:
-- Cada recomendación debe estar respaldada por al menos un fragmento de los provistos — citá su chunk_id en chunk_ids_citados.
+- Cada recomendación debe estar respaldada por al menos un fragmento de los provistos — cita su chunk_id en chunk_ids_citados.
 - No inventes fragmentos ni cites chunk_ids que no te hayan sido provistos.
-- Si ningún fragmento recuperado es realmente relevante, decilo en el detalle en vez de forzar una cita que no corresponde — podés dejar chunk_ids_citados vacío para esa recomendación.
-- Si recibís la validación de un ciclo anterior rechazado, corregí específicamente lo que falló — no repitas el mismo borrador.`;
+- Si ningún fragmento recuperado es realmente relevante, dilo en el detalle en vez de forzar una cita que no corresponde — puedes dejar chunk_ids_citados vacío para esa recomendación.
+- Si recibes la validación de un ciclo anterior rechazado, corrige específicamente lo que falló — no repitas el mismo borrador.`;
 
 function buildQueryText(accionNext: AccionNext, feedbackValidacion?: ValidacionCiclo): string {
   const partes = [accionNext.titulo, accionNext.descripcion, accionNext.justificacion];

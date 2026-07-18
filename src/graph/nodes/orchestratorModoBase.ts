@@ -17,6 +17,7 @@ import {
   validateStartup,
   type Prerequisito,
 } from "../../lib/ontologyEngine.js";
+import { conceptLabel, relationLabel } from "../../lib/ontologyLabels.js";
 import { invokeStructured } from "../../lib/structuredOutputRetry.js";
 import {
   modoBaseConflictoSchema,
@@ -64,21 +65,37 @@ export async function getPrerequisitosParaEspecialista(especialista: Especialist
   return getPrerequisitos(conceptId);
 }
 
+// Frase de encuadre fija (siempre antepuesta): el fundador no debe leer
+// esto como una evaluación de su startup real — en modo base no hay
+// hechos concretos, es solo el orden metodológico genérico del TBox.
+const FRASE_ENCUADRE =
+  "Esto es información general sobre el orden metodológico habitual de esta tarea según Lean Startup — no es una evaluación de tu startup real, que en este modo Startup-Next no conoce.";
+
+// Narrativa ordenada por distancia ascendente ("antes de esto, conviene
+// haber hecho X; y antes de eso, Y"), con concept_id/relacion traducidos a
+// español (lib/ontologyLabels.ts) en vez de exponer los ids técnicos crudos
+// del TBox. Reemplaza el join plano anterior (concept_id/relacion/distancia
+// en crudo) que era ilegible para el fundador.
+function narrarPrerequisitos(prerequisitos: Prerequisito[]): string {
+  const ordenados = [...prerequisitos].sort((a, b) => a.distancia - b.distancia);
+  const pasos = ordenados.map((p, i) => {
+    const conector = i === 0 ? "Antes de esto, conviene haber trabajado en" : "Y antes de eso";
+    return `${conector}: ${conceptLabel(p.concept_id)} (relación: ${relationLabel(p.relacion)})`;
+  });
+  return `${FRASE_ENCUADRE} ${pasos.join(". ")}.`;
+}
+
 // Reusa hallazgos_ontologia con un rule_id sintético en vez de sumar un
 // campo nuevo al contrato (decisión confirmada, sección 8) — un solo
-// hallazgo que junta todos los prerrequisitos, mismo patrón de join que ya
-// usa toHallazgosOntologia para los hallazgos reales de una regla.
+// hallazgo que junta todos los prerrequisitos en una sola narrativa legible.
 export function buildHallazgosPrerequisitoGenerico(prerequisitos: Prerequisito[]): HallazgoOntologia[] {
   if (prerequisitos.length === 0) return [];
-  const detalle = prerequisitos
-    .map((p) => `${p.concept_id} precede metodológicamente a esta tarea (vía ${p.relacion}, distancia ${p.distancia})`)
-    .join("; ");
-  return [{ rule_id: "PREREQUISITO_GENERICO", hallazgos: detalle }];
+  return [{ rule_id: "PREREQUISITO_GENERICO", hallazgos: narrarPrerequisitos(prerequisitos) }];
 }
 
 const MODO_BASE_SYSTEM_PROMPT = `Estás evaluando, en modo base (sin hechos reales de ninguna startup), si el comentario de un asesor humano podría no alinear con los prerrequisitos metodológicos genéricos de la tarea elegida — según la ontología Lean Startup, en abstracto.
 
-No estás verificando contra el estado real de una startup (no lo hay). Esto es solo información para que el fundador/asesor reconcilien con lo que saben de su situación real — nunca un bloqueo. Si el comentario del asesor no contradice ni ignora los prerrequisitos listados, o si no hay tensión real, marcá conflicto_detectado=false. Marcalo true solo si el comentario sugiere saltear o ignorar explícitamente algo que la metodología presupone como paso previo.`;
+No estás verificando contra el estado real de una startup (no lo hay). Esto es solo información para que el fundador/asesor reconcilien con lo que saben de su situación real — nunca un bloqueo. Si el comentario del asesor no contradice ni ignora los prerrequisitos listados, o si no hay tensión real, marca conflicto_detectado=false. Márcalo true solo si el comentario sugiere saltear o ignorar explícitamente algo que la metodología presupone como paso previo.`;
 
 function buildModoBaseUserPrompt(
   accion: { titulo: string; descripcion: string },

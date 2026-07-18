@@ -92,7 +92,7 @@ async function fireCallbackIfNeeded(run: NextActionRun): Promise<void> {
 // hacia next_action_runs, que es el único contrato expuesto por la API.
 async function syncChunkToRun(runId: string, chunk: unknown): Promise<NextActionRun> {
   if (isInterrupted<{ pregunta: string }>(chunk)) {
-    const pregunta = chunk[INTERRUPT][0]?.value?.pregunta ?? "¿Podés dar más contexto sobre la prioridad?";
+    const pregunta = chunk[INTERRUPT][0]?.value?.pregunta ?? "¿Puedes dar más contexto sobre la prioridad?";
     await queries.createClarification({ runId, pregunta, respuesta: null });
     return queries.updateRun(runId, { status: "needs_clarification" });
   }

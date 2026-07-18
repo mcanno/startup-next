@@ -5,11 +5,11 @@ import { getChatModel, getInformesParseModelConfig } from "../config/models.js";
 import { invokeStructured } from "../lib/structuredOutputRetry.js";
 import { informeParseDecisionSchema, type OpcionPropuesta } from "../schemas.js";
 
-const SYSTEM_PROMPT = `Sos el extractor de opciones de Startup-Next. Recibís el texto de un informe de situación generado por startup-advisor y tenés que identificar las acciones/opciones concretas que ese informe propone como posibles próximos pasos para la startup.
+const SYSTEM_PROMPT = `Eres el extractor de opciones de Startup-Next. Recibes el texto de un informe de situación generado por startup-advisor y tienes que identificar las acciones/opciones concretas que ese informe propone como posibles próximos pasos para la startup.
 
 Reglas:
-- Cada opción necesita un título corto y un resumen que explique de qué se trata y por qué importa — no copies párrafos enteros, sintetizá.
-- Si el informe propone una sola dirección clara, devolvé una sola opción — no inventes alternativas que el informe no plantea.
+- Cada opción necesita un título corto y un resumen que explique de qué se trata y por qué importa — no copies párrafos enteros, sintetiza.
+- Si el informe propone una sola dirección clara, devuelve una sola opción — no inventes alternativas que el informe no plantea.
 - No agregues opciones genéricas de relleno ("mejorar el producto") si el texto no las sugiere específicamente.`;
 
 export async function extractOpcionesDesdeTexto(texto: string): Promise<OpcionPropuesta[]> {

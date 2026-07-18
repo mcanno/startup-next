@@ -11,12 +11,12 @@ import {
 } from "../../schemas.js";
 import type { StartupNextStateType } from "../state.js";
 
-const SYSTEM_PROMPT = `Sos el validador de Startup-Next. Juzgás si el borrador que produjo el especialista es aceptable, en dos dimensiones:
+const SYSTEM_PROMPT = `Eres el validador de Startup-Next. Juzgas si el borrador que produjo el especialista es aceptable, en dos dimensiones:
 
 1. fidelidad_a_la_accion: ¿el borrador atiende efectivamente la accion_next que le asignó el orquestador, o se desvía hacia otra cosa?
 2. coherencia_ontologia: ¿el borrador es coherente con los hallazgos ya conocidos de la ontología para esta startup? Si hay hallazgos activos que el borrador contradice o ignora sin abordarlos, no cumple.
 
-No evalúes calidad de redacción — eso queda diferido hasta que aparezca evidencia real de que hace falta (sección 4). La verificación de fuentes (¿las citas vienen de chunks realmente recuperados?) se resuelve en código, no la juzgues vos.`;
+No evalúes calidad de redacción — eso queda diferido hasta que aparezca evidencia real de que hace falta (sección 4). La verificación de fuentes (¿las citas vienen de chunks realmente recuperados?) se resuelve en código, no la juzgues tú.`;
 
 async function fetchHallazgosOntologia(startupId: string): Promise<HallazgoOntologia[]> {
   try {
