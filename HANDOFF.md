@@ -2,6 +2,25 @@
 
 Última actualización: 2026-07-18.
 
+## Primer despliegue real a producción (2026-07-18)
+
+**No es una corrección de un deploy anterior** — `startup-next` nunca se había desplegado a Fly.io. Todo el desarrollo y verificación previos (Hitos 1-3, firma Ed25519, capa de reparación) se hicieron y probaron contra `localhost:8000`. El motivo de este deploy: `hermes-startup-next` necesita invocar un servicio accesible por red, no localhost.
+
+**URL real de producción**: `https://startup-next.fly.dev`. Confirmado que `hermes-startup-next/.env.example` ya apuntaba a esa misma URL — no hizo falta actualizarlo.
+
+**Cuenta/org de Fly**: `manuelj.canno@gmail.com`, org `personal` — la misma que `ontology-engine` (verificado con `flyctl orgs list`: es la única org accesible; `ontology-engine` ya estaba deployado ahí y reachable). No hizo falta ninguna org distinta.
+
+**Pasos reales**: `flyctl launch --no-deploy --copy-config --yes --name startup-next --org personal` (creó la app reusando el `fly.toml`/`Dockerfile` ya versionados; solo reescribió el comentario de cabecera del `fly.toml`, restaurado a mano), `flyctl secrets import` con los valores reales de `.env.local` — con **una excepción deliberada**: `ONTOLOGY_ENGINE_URL` se sobreescribió a `https://ontology-engine.fly.dev` (producción), no al `http://localhost:8001` que tenía `.env.local` para desarrollo local. Luego `flyctl deploy`.
+
+**Dos problemas reales encontrados y resueltos, no ambientales los dos**:
+1. **Avast interceptando TLS** en el builder remoto de Fly (mismo patrón ya documentado en `diseno_startup_next.md` para `ontology-engine` y `rag-ingest`) — resuelto pausando el antivirus. Sigue pendiente la excepción permanente para Docker Desktop/WSL2 y `flyctl` que ya se había recomendado antes y nunca se configuró.
+2. **Bug real de empaquetado, no del entorno**: `package-lock.json` (generado con npm 11 local) resultaba inconsistente para `npm ci` bajo npm 10.9.8 (la versión que trae `node:22-slim`, la imagen base del `Dockerfile`) — faltaban entradas de `esbuild@0.28.1` y sus binarios por plataforma. Regenerado corriendo `npm install --package-lock-only` con `npx npm@10.9.8` en vez del npm local, para que el lockfile sea consistente con la imagen real de build. **Ojo**: correr `npm install` normal (sin fijar la versión de npm) vuelve a regenerar el lock con la resolución de npm 11 y reintroduce el problema — ya pasó una vez en esta misma sesión.
+3. **Bug real de dependencias, encontrado recién en este primer deploy real**: `dotenv` estaba en `devDependencies`, pero `src/main.ts` lo importa incondicionalmente a nivel de módulo (`import { config } from "dotenv"`) — código que sí corre en producción. `npm ci --omit=dev` (segunda stage del `Dockerfile`) lo excluía, y el proceso moría en el arranque con `ERR_MODULE_NOT_FOUND: Cannot find package 'dotenv'` (visto vía `flyctl logs`, streaming en vivo — `flyctl logs --no-tail` fallaba de forma intermitente con 401/timeout, sin relación con el bug real). **Corregido**: `dotenv` movido a `dependencies`. Nunca se había ejercitado este código path en producción antes — el bug es preexistente, no introducido en esta sesión.
+
+**Verificado end-to-end contra la URL real**: `GET /health` → `200 {"status":"ok"}`. `POST /informes/parse` con texto libre corto → `200`, `opciones_propuestas` con un elemento y `startup_id` aleatorio (modo base, como se espera para texto libre). Máquina en estado `started`, healthcheck `1/1 passing`.
+
+**Pendiente, no resuelto en esta sesión**: no se verificó el modo enriquecido (PDF firmado con `startup_id` real) contra la producción recién desplegada, ni el resto de endpoints (`/runs`, `/runs/{id}/start`, `/runs/{id}/respond`, `/admin/*`). Tampoco se commitearon todavía los cambios (`package.json`, `package-lock.json`, `fly.toml`) — quedan en el working tree, pendientes de confirmación explícita antes de commitear.
+
 ## Cierre de sesión: español de España + narrativa de prerrequisitos + UI (2026-07-18)
 
 Cruza dos repos: `startup-next` (backend) y `startup-next-ui` (frontend). Todo commiteado y pusheado a `origin/master` en ambos, un commit por feature real (sin mezclar), separando hunks con `git add -p` donde hizo falta.
