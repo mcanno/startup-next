@@ -1,6 +1,30 @@
 # HANDOFF — startup-next (backend)
 
-Última actualización: 2026-07-14.
+Última actualización: 2026-07-18.
+
+## Cierre de sesión: español de España + narrativa de prerrequisitos + UI (2026-07-18)
+
+Cruza dos repos: `startup-next` (backend) y `startup-next-ui` (frontend). Todo commiteado y pusheado a `origin/master` en ambos, un commit por feature real (sin mezclar), separando hunks con `git add -p` donde hizo falta.
+
+**`startup-next`** — un solo commit, `abde5de`: traducción de los 4 system prompts de LLM (orchestrator, orchestratorModoBase, validator, specialist/mvp, informes/parseOpciones) y el fallback de `runsService.ts` de voseo rioplatense a español de España, más `src/lib/ontologyLabels.ts` (nuevo) — traduce `PREREQUISITO_GENERICO` de strings técnicos crudos (`concept_id`, `relacion`, `distancia`) a una narrativa en español natural, ordenada por distancia ascendente, con frase de encuadre fija ("esto es información general... no es una evaluación de tu startup real"). El contrato JSON no cambió (`{rule_id, hallazgos}` sigue igual), solo el contenido del string `hallazgos`. Verificado con un run real vía `curl` — la narrativa nueva salió tal cual se diseñó.
+
+**`startup-next-ui`** — 7 commits, en este orden:
+
+| Commit | Contenido | Verificación |
+|---|---|---|
+| `d712e61` | Traducción de strings de UI a español de España (login, error de run) | No re-verificada visualmente |
+| `b2d5a4e` | `formatHallazgo()` unificado en 3 componentes (deja de mostrar `rule_id` técnico crudo) | Parte del flujo probado abajo, sin verificación aislada |
+| `f359d75` | Fix del badge de estado (texto blanco invisible → negro en negrita) | **Verificado visualmente en navegador real** |
+| `e07d623` | Descarga de PDF del informe final (`@react-pdf/renderer`) | **Verificado funcionalmente en navegador real**: run `approved`, PDF descargado y abierto sin error |
+| `66ce0fd` | Formulario de un solo paso (implementa la spec de sección 9 ya documentada, no diseño nuevo — ver hallazgo abajo) | **Verificado end-to-end en navegador real** con un PDF firmado real |
+| `5c919a6` | Sincroniza `diseno_startup_next.md` de este repo con la versión ya commiteada en `startup-next` (`6c61384`) — nunca se había sincronizado | Solo documentación |
+| `b91e9df` | Actualiza `HANDOFF.md` propio de `startup-next-ui` con este mismo cierre | — |
+
+**Hallazgo real durante el inventario previo al commit**: dos de las piezas de `startup-next-ui` (el formulario de un solo paso y la descarga de PDF) no eran trabajo de esta sesión — eran una feature completa de una sesión anterior, implementada pero nunca commiteada, mezclada en el working tree con los cambios de hoy. Se separaron por archivo/hunk antes de commitear (`git add -p` en `app/runs/[id]/page.tsx`, que tenía 3 cambios independientes en el mismo archivo: badge, link de descarga, traducción del error). El propio `HANDOFF.md` de `startup-next-ui` (también sin commitear hasta hoy) confirmaba de forma independiente que esa feature era de antes: documentaba que el commit previo `bd4b473` tenía un mensaje impreciso ("flujo PDF/texto excluyente") que no reflejaba el código real de ese momento.
+
+**Verificación de tipos**: `npx tsc --noEmit` limpio en ambos repos antes de cada commit.
+
+**Pendiente real, no cerrado hoy**: la traducción a español de España (`d712e61` en `startup-next-ui`, y la parte de `abde5de` en `startup-next`) no se re-verificó visualmente — es texto de bajo riesgo (cambios de palabra puntuales, `tsc` limpio, algunas strings ya se vieron indirectamente en runs reales), pero sigue siendo una verificación abierta.
 
 ## Módulo recién completado: verificación de firma del PDF + capa de reparación de structured output
 
