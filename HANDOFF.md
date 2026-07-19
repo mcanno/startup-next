@@ -30,6 +30,25 @@ esta producción específica — lo probado hoy generó la firma por script
 directo con la clave real, para acotar el alcance. Ese camino de UI
 completa ya se había verificado antes, pero en local (2026-07-14).
 
+### Segunda pasada, contra una startup real preexistente (mismo día)
+
+La verificación de arriba usó un `startup_id` de prueba desechable. Se
+repitió después contra una startup real ya existente en producción
+("Virtual Atelier AI", con 5 individuals reales de antes de esta sesión,
+sin tocarlos) para confirmar `hallazgos_ontologia` con hechos genuinamente
+reales, no creados ad hoc. Confirmado: dos hallazgos reales
+(`R1_hipotesis_sin_experimento` sobre sus dos hipótesis reales,
+`R4_startup_sin_fundador` porque nunca se pudo registrar esa relación
+antes del fix de `ontology-engine` de hoy). Detalle completo, incluyendo
+un fallo transitorio del especialista MVP (ya conocido, no relacionado)
+y un hallazgo real en `hermes-startup-next` sobre pérdida de contenido en
+el camino PDF, en `hermes-startup-next/HANDOFF_HERMES.md`.
+
+Este fallo transitorio confirma con datos reales (no solo el ~6%
+sintético medido antes) que el especialista MVP sigue fallando en
+producción real bajo el `accion_next` real del orquestador — ver
+"Problemas conocidos / pendientes" #1, abajo.
+
 ## Primer despliegue real a producción (2026-07-18)
 
 **No es una corrección de un deploy anterior** — `startup-next` nunca se había desplegado a Fly.io. Todo el desarrollo y verificación previos (Hitos 1-3, firma Ed25519, capa de reparación) se hicieron y probaron contra `localhost:8000`. El motivo de este deploy: `hermes-startup-next` necesita invocar un servicio accesible por red, no localhost.
@@ -136,7 +155,7 @@ Siguiendo `handoff_entorno_pruebas_local.md` (traspaso de otra sesión, ver punt
 
 ## Problemas conocidos / pendientes
 
-1. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real. Confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba): la primera corrida real vía UI falló así, la segunda con el mismo PDF funcionó.
+1. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real. Confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba): la primera corrida real vía UI falló así, la segunda con el mismo PDF funcionó. **Reconfirmado el 2026-07-19** contra esta producción (`startup-next.fly.dev`) con el camino PDF firmado/modo enriquecido real: mismo patrón exacto (`resumen_estrategia` ausente, `recomendaciones` como string), mismo resultado (reintentar el mismo PDF una vez más dio `approved`). Tercera confirmación real de este patrón, cada vez en un entorno distinto — vale la pena priorizarlo.
 2. `informeParseDecisionSchema` tiene la misma forma de riesgo (array de objetos) que `specialistDecisionSchema` pero no se lo vio fallar hoy — ya tiene la capa de reparación aplicada preventivamente, sin confirmar si hacía falta.
 3. `handoff_startup_next_v2.md` y `handoff_entorno_pruebas_local.md` siguen sin trackear en este y otros repos — ambos son documentos de traspaso generados a propósito al cierre de sesiones anteriores, pensados para copiarse a las carpetas de trabajo al inicio de una sesión nueva. No se commitean (no son código); `handoff_startup_next_v2.md` contiene pendientes adicionales no reflejados aquí (Hermes en suspenso, entrevista de `startup-advisor` terminando abruptamente, excepción de Avast pendiente).
 4. `GET /runs/:id` no expone el campo `error` guardado en `next_action_runs.error` cuando `status === "failed"` (`serializeRun()` en `src/routes/runs.ts`) — hoy hace falta consultar Postgres directo para diagnosticar un run fallido. Candidato simple a agregar.
