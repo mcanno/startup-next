@@ -38,11 +38,16 @@ repitió después contra una startup real ya existente en producción
 sin tocarlos) para confirmar `hallazgos_ontologia` con hechos genuinamente
 reales, no creados ad hoc. Confirmado: dos hallazgos reales
 (`R1_hipotesis_sin_experimento` sobre sus dos hipótesis reales,
-`R4_startup_sin_fundador` porque nunca se pudo registrar esa relación
-antes del fix de `ontology-engine` de hoy). Detalle completo, incluyendo
-un fallo transitorio del especialista MVP (ya conocido, no relacionado)
-y un hallazgo real en `hermes-startup-next` sobre pérdida de contenido en
-el camino PDF, en `hermes-startup-next/HANDOFF_HERMES.md`.
+`R4_startup_sin_fundador` porque la relación `tiene_fundador` nunca se
+registró — auditado después: no es el bug de `ontology-engine`, es que
+`startup-advisor` nunca implementó un caller para `POST /facts`, ver
+`ontology-engine/HANDOFF.md`. Efecto real para este repo: cualquier
+consulta de modo enriquecido contra una startup real con individuals va a
+disparar R1/R2/R4 siempre, sin relación con si el fundador hizo o no esos
+pasos). Detalle completo, incluyendo un fallo transitorio del especialista
+MVP (ya conocido, no relacionado) y un hallazgo real en
+`hermes-startup-next` sobre pérdida de contenido en el camino PDF (ya
+corregido ahí), en `hermes-startup-next/HANDOFF_HERMES.md`.
 
 Este fallo transitorio confirma con datos reales (no solo el ~6%
 sintético medido antes) que el especialista MVP sigue fallando en
