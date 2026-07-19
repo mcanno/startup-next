@@ -1,6 +1,34 @@
 # HANDOFF — startup-next (backend)
 
-Última actualización: 2026-07-18.
+Última actualización: 2026-07-19.
+
+## Camino PDF firmado / modo enriquecido cerrado de extremo a extremo (2026-07-19)
+
+El bloqueo que quedaba pendiente ("Primer despliegue real a producción",
+más abajo: "no se verificó el modo enriquecido... contra la producción
+recién desplegada") está resuelto. Causa real del bloqueo: un `500` sin
+detalle en `ontology-engine` (`POST /startups/{id}/individuals`, tabla
+`startup_individuals.startup_id` con una FK real hacia `startups.id` no
+reflejada en el `.sql` de migración trackeado) — no un bug de
+`startup-next`. Fix, evidencia y detalle completo en
+`ontology-engine/HANDOFF.md` (nuevo, repo `startup-advisor`) y en
+`hermes-startup-next/HANDOFF_HERMES.md`.
+
+Verificado contra esta producción (`startup-next.fly.dev`), con un
+`startup_id` de prueba real con individuals reales en `ontology-engine`:
+firma Ed25519 verificada correctamente (`startup_id` real extraído, no
+aleatorio), modo enriquecido activado, `hallazgos_ontologia` con un
+hallazgo específico y real (no `PREREQUISITO_GENERICO`), run `approved`
+vía especialista `mvp`. También verificados en esta sesión, directo
+contra esta producción: `POST /runs/{id}/respond` (ciclo de
+`needs_clarification` completo, forzado con texto ambiguo) y `/admin/*`
+(incluyendo los 401 cruzados entre `API_KEY_ADMIN`/`API_KEY_APP`).
+
+**No verificado todavía**: el camino con un PDF real generado por la UI
+completa de `startup-advisor` (entrevista → informe → descarga) contra
+esta producción específica — lo probado hoy generó la firma por script
+directo con la clave real, para acotar el alcance. Ese camino de UI
+completa ya se había verificado antes, pero en local (2026-07-14).
 
 ## Primer despliegue real a producción (2026-07-18)
 
