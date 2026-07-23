@@ -99,7 +99,7 @@ function buildAccionNext(
     hallazgos_ontologia: hallazgosOntologia,
     conflicto_comentario_asesor: conflicto,
     especialista_requerido: especialistaRequerido,
-    especialista_disponible: especialistaRequerido === "mvp",
+    especialista_disponible: especialistaRequerido === "mvp" || especialistaRequerido === "ideacion",
     ...(resueltoSinAclaracionCompleta ? { resuelto_sin_aclaracion_completa: true } : {}),
   };
 }

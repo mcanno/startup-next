@@ -1,3 +1,4 @@
+import { runIdeacionSpecialist } from "../../specialist/ideacion.js";
 import { runMvpSpecialist } from "../../specialist/mvp.js";
 import type { StartupNextStateType } from "../state.js";
 
@@ -13,6 +14,13 @@ export async function specialistNode(
   // el mismo borrador rechazado.
   const feedbackValidacion = state.cycle > 0 ? state.ciclos[state.cycle - 1]?.validacion : undefined;
 
-  const { borrador, retrievedChunks } = await runMvpSpecialist(state.accionNext, feedbackValidacion);
+  // Solo "mvp" e "ideacion" pueden llegar acá (orchestrator.ts solo marca
+  // especialista_disponible=true para esos dos) — el resto cae a
+  // sin_especialista antes de alcanzar este nodo.
+  const { borrador, retrievedChunks } =
+    state.accionNext.especialista_requerido === "ideacion"
+      ? await runIdeacionSpecialist(state.accionNext, feedbackValidacion)
+      : await runMvpSpecialist(state.accionNext, feedbackValidacion);
+
   return { borrador, retrievedChunks };
 }

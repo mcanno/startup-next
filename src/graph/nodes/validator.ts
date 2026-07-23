@@ -122,7 +122,7 @@ export async function validatorNode(state: StartupNextStateType): Promise<Partia
   const ciclo: Ciclo = {
     cycle,
     accion_decidida: state.accionNext,
-    especialista: "mvp",
+    especialista: accionNext.especialista_requerido,
     borrador: state.borrador,
     validacion,
     created_at: new Date().toISOString(),
@@ -131,7 +131,7 @@ export async function validatorNode(state: StartupNextStateType): Promise<Partia
   const patch: Partial<StartupNextStateType> = {
     ciclos: [ciclo],
     cycle,
-    especialistaUsado: "mvp",
+    especialistaUsado: accionNext.especialista_requerido,
   };
 
   if (validacion.aprobado) {

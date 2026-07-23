@@ -39,6 +39,15 @@ async function serializeRun(run: NextActionRun) {
     return { ...base, pregunta };
   }
 
+  // Pendiente cerrado (documentado desde 2026-07-14, ver HANDOFF.md):
+  // sin esto, diagnosticar un run failed requería consultar
+  // next_action_runs.error directo en Postgres. Solo se expone en failed,
+  // mismo criterio que informe_final/no_respuesta (null/ausente en el
+  // resto de estados) -- no se cambia el contrato para otros estados.
+  if (run.status === "failed") {
+    return { ...base, error: run.error ?? null };
+  }
+
   return base;
 }
 

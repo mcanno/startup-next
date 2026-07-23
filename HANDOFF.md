@@ -1,6 +1,243 @@
 # HANDOFF — startup-next (backend)
 
-Última actualización: 2026-07-19.
+Última actualización: 2026-07-21.
+
+## Especialista "ideacion" implementado y desplegado (2026-07-21)
+
+Implementa `diseno_especialista_ideacion.md` completo (los 6 puntos ya
+confirmados), con las dos condiciones adicionales de esa confirmación
+resueltas antes de tocar código de enrutamiento. Cafelibro
+(`4df8de99-62aa-4211-b09c-e8b44fea38fb`), atascada en
+`sin_especialista`/`ideacion` desde el 2026-07-19, ya no lo está.
+
+### Condición 1 — re-etiquetado del corpus RAG: aditivo, confirmado sin regresión
+
+**Decisión confirmada**: aditivo (`["mvp", "ideacion"]`), no exclusivo.
+Un chunk sirve a ambos especialistas; `especialista_tags @> [...]` en
+Postgres (containment JSONB) soporta arrays con más de un tag sin
+cambios, y aditivo tiene **cero riesgo de regresión por construcción**
+para MVP (ningún chunk pierde `"mvp"`).
+
+Editados a mano `rag-ingest/out/customer-development.jsonl` (137 chunks,
+capítulos "Una introducción al descubrimiento de clientes", "El
+descubrimiento de clientes", "Camino a la epifanía...", "Camino al
+desastre...") y `rag-ingest/out/guia-canvas.jsonl` (70 chunks, "SESIÓN 1
+DE LA IDEA, AL NEGOCIO" y los módulos de sesiones 2/3) — exactamente los
+~207 chunks identificados en el diseño. `lean_startup.jsonl` sin tocar
+(más genérico/transversal, fuera de alcance del diseño). Backup de los
+dos `.jsonl` originales guardado antes de editar (no son parte del repo,
+`.gitignore`).
+
+`rag-ingest load` corrido con el intérprete Python correcto (ver nota de
+entorno abajo) para `customer-development.jsonl` (778 upserteados, 0
+huérfanos) y `guia-canvas.jsonl` (190 upserteados, 0 huérfanos) —
+conteos exactos, sin pérdida de datos.
+
+**Verificado con evidencia real, no solo revisando el `.jsonl`**:
+- `SELECT count(*) FROM rag_chunks` → sigue en 1.126.
+- Distribución real: `["mvp"]` → 919, `["mvp","ideacion"]` → 207 (exacto
+  a lo esperado). 0 chunks con `embedding IS NULL` tras el load.
+- `searchRagChunks(embedding, "ideacion")` con una consulta real
+  ("cómo validar el problema de mis clientes y elegir un segmento antes
+  de construir nada") devolvió 5 resultados reales y temáticamente
+  correctos (descubrimiento de clientes, encaje problema/solución) —
+  antes de este cambio habría devuelto `[]` siempre.
+- `searchRagChunks(embedding, "mvp")` con la consulta ya usada por
+  `verify_ingestion()` sigue devolviendo resultados normalmente — sin
+  regresión (garantizado por construcción al ser aditivo, confirmado
+  igual con una corrida real).
+
+**Nota de entorno real, no de producto**: `python`/`python3` en esta
+máquina resuelven a instalaciones distintas (Anaconda 3.12 vs. el
+Python 3.13 standalone donde `pip install` puso `psycopg`/`pgvector`/
+`voyageai`) — `python -m rag_ingest.cli load` fallaba con
+`ModuleNotFoundError` hasta invocar el intérprete correcto explícito
+(`AppData/Local/Programs/Python/Python313/python.exe`). No hizo falta
+el Dockerfile completo de `rag-ingest` (que instala MinerU/torch, pesado)
+para correr `load` — ese subcomando solo importa `psycopg`/`pgvector`/
+`click`/`voyageai`, confirmado leyendo `db.py`/`voyage_client.py`; el
+import de nivel superior de `mineru_runner.py` en `cli.py` no requiere el
+paquete `mineru` instalado (solo hace `subprocess` en tiempo de
+ejecución).
+
+### Condición 2 (Cafelibro) + verificación de código y enrutamiento
+
+Implementados los 6 puntos del diseño más el hallazgo de esa misma
+investigación (`validator.ts` hardcodeaba `"mvp"` en dos lugares, no
+mencionado en la lista original de 5 puntos de enrutamiento):
+
+1. `src/graph/nodes/orchestrator.ts` — `especialista_disponible` ahora
+   `especialistaRequerido === "mvp" || especialistaRequerido === "ideacion"`.
+2. `src/specialist/ideacion.ts` (nuevo) — mismo patrón que `mvp.ts`,
+   reusa `specialistDecisionSchema` tal cual (sin schema nuevo, según lo
+   confirmado en el diseño), `SYSTEM_PROMPT` propio centrado en validar
+   problema/cliente, segmento e hipótesis de valor.
+3. `src/graph/nodes/specialist.ts` — dispatcher: `especialista_requerido
+   === "ideacion"` → `runIdeacionSpecialist()`, cualquier otro caso (hoy
+   solo `"mvp"` puede llegar acá) → `runMvpSpecialist()` sin cambios.
+4. `src/graph/nodes/validator.ts` — `ciclo.especialista` y
+   `especialistaUsado` pasan de `"mvp"` hardcodeado a
+   `accionNext.especialista_requerido` real.
+
+Ningún cambio en `ESPECIALISTA_A_CONCEPTO` (`orchestratorModoBase.ts`) —
+sigue sin ancla para `ideacion`, como se decidió en el diseño (punto 2,
+sin modelar nada nuevo en el TBox en esta pasada).
+
+`npx tsc --noEmit` limpio. Desplegado a `startup-next.fly.dev`
+(`flyctl deploy`).
+
+**Verificado con evidencia real contra esta producción, los dos casos
+del plan de verificación**:
+
+- **Caso A, Cafelibro real, modo enriquecido**: reinvocado con la misma
+  tarea real ya usada el 2026-07-19 ("Elegir un único segmento y
+  validarlo con entrevistas..."), reusando su `startup_id` real
+  (`4df8de99-...`, 8 individuals reales en `ontology-engine`). Resultado:
+  `status: "approved"` (ya no `sin_especialista`), `especialista_usado:
+  "ideacion"`, 6 recomendaciones reales en `informe_final`, con fuentes
+  RAG reales citadas — entre ellas, literalmente
+  `"Customer Development — Una introducción al descubrimiento de
+  clientes — Descubrimiento de clientes, fase 1: Determinar las
+  hipótesis del modelo de negocio"` y `"...— Salir a la calle"`:
+  confirma que el re-etiquetado de la condición 1 no solo cuenta bien en
+  la base, sino que el especialista real efectivamente las recupera y
+  las cita.
+- **Caso B, texto libre nuevo, modo base**: tarea de ideación genuina
+  ("Todavía no sé bien qué problema resolver ni para quién..."), sin
+  `startup_id` real. Resultado: `status: "approved"`,
+  `especialista_usado: "ideacion"`, `hallazgos_ontologia: []` (sin
+  `PREREQUISITO_GENERICO`, sin bloqueo, sin error) — confirma el punto 2
+  del diseño con datos reales, no solo por lectura de código.
+
+**Limpieza**: los dos runs de verificación (`01bcd567-...` y
+`cb78b0c7-...`, ambos `requested_by: "hermes"`) se borraron al cierre —
+son invocaciones de prueba, no acciones reales del fundador, mismo
+criterio ya aplicado con Virtual Atelier AI (incluye el de Cafelibro:
+reusa su `startup_id` real solo para probar modo enriquecido, no es una
+tarea que Cafelibro haya pedido de verdad). Confirmado por conteo
+(36 → 34 filas). Las dos filas reales de Cafelibro
+(`567fcf09-...`/`a1975e40-...`) verificadas intactas antes de borrar
+nada. Scripts temporales usados (re-etiquetado, verificación, limpieza)
+borrados al terminar, no commiteados.
+
+## Limpieza de filas de test en `next_action_runs` (2026-07-21)
+
+Durante la verificación de las tres capas de contexto histórico
+consolidado en `hermes-startup-next` (ver
+`hermes-startup-next/HANDOFF_CONTEXTO_HISTORICO.md`, sección "Revisión de
+arquitectura"), correr repetidamente `test/manual/verify-historical-context.ts`
+contra esta producción dejó filas de prueba reales en `next_action_runs`
+(Neon propia de `startup-next`). `hermes-startup-next` no tiene
+credenciales de base de datos (por diseño, solo cliente HTTP), así que la
+limpieza se hizo desde este repo, que sí tiene acceso directo a
+`DATABASE_URL`.
+
+**Identificación, no asumida**: se consultaron todas las filas
+`requested_by = 'hermes'` (18 en total). Se descartaron como reales, sin
+tocarlas, las que coinciden con contenido/`run_id` ya documentado como uso
+genuino del producto — en particular `567fcf09-780c-4682-a8e7-535ad9c0da45`
+y `a1975e40-ff3c-41c9-bd50-39aabbeea4e8`, verificadas por coincidencia
+exacta de `run_id` contra `hermes-startup-next/memoria/demo-cafelibro-real/*.md`
+(las dos invocaciones reales de Cafelibro, 2026-07-19). También quedaron
+sin tocar, por estar fuera del alcance de esta limpieza (no son de la
+sesión de hoy), otras filas de test más viejas de 2026-07-18/19 (Virtual
+Atelier AI, pruebas de `verify-action-executor.ts`, etc.) — **resuelto
+más abajo, misma fecha** ("Limpieza de filas de test más antiguas...").
+
+Las **7 filas de hoy** (2026-07-21) se confirmaron una por una antes de
+borrar: todas `requested_by = 'hermes'`, `source = 'texto_libre'`, y con
+el texto sintético hardcodeado del script (`"Definir el MVP para validar
+la hipótesis de valor con clientes reales."`, o los bloques
+`[CONTEXTO_HISTORICO]`/`[TAREA_PROPUESTA]` literales de
+`composeInvocationText()`) — nunca texto real de un fundador. Ninguna
+coincidía con los `run_id` reales de Cafelibro.
+
+**Borrado confirmado por conteo, no por inferencia**: 18 filas
+`requested_by = 'hermes'` antes del borrado, 11 después (exactamente las
+7 esperadas). Sin filas huérfanas en `next_action_clarifications` para
+esos `run_id`. Script usado (`@neondatabase/serverless`, mismo cliente que
+ya usa el proyecto) escrito ad hoc y borrado al terminar — no quedó
+commiteado, no es parte del producto.
+
+**Nota de entorno, no de producto**: `bash source .env.local` trunca
+`DATABASE_URL` en el primer `&` sin comillas (lo interpreta como
+backgrounding de un job), así que cualquier script que necesite esta
+variable debe leer `.env.local` directo (regex/parseo simple), no confiar
+en `source`/`export` de la shell para este archivo en particular.
+
+## Limpieza de filas de test más antiguas en `next_action_runs` (2026-07-21, sesión aparte de la anterior)
+
+Cierra el pendiente dejado explícitamente fuera de alcance en la limpieza
+de arriba: filas de test de las sesiones **2026-07-18 y 2026-07-19**
+(verificación de `ActionExecutor`, contexto histórico inicial, y el
+camino Virtual Atelier AI/MVP), que nunca se habían borrado — salvo dos
+filas de esa misma sesión de Virtual Atelier AI que sí se habían
+eliminado en su momento (ver `HANDOFF_HERMES.md`, "el intento fallido y
+el exitoso... se borraron").
+
+**Identificación, no asumida**: de las 11 filas `requested_by = 'hermes'`
+restantes tras la limpieza anterior, 2 son las reales de Cafelibro
+(mismas de arriba, re-confirmadas por `run_id` contra
+`hermes-startup-next/memoria/demo-cafelibro-real/*.md` antes de tocar
+nada). Las otras 9 se identificaron por fecha (2026-07-18/19) y contenido
+sintético reconocible — varias con la etiqueta explícita "sintético/de
+prueba" en el propio `resumen` guardado, otras con el texto literal de
+los scripts de verificación (`"Tarea de prueba A -- el executor debe
+declinar acá."`, bloques `[TAREA_PROPUESTA]`/`[CONTEXTO_HISTORICO]`
+literales, o el texto deliberadamente vago del test de
+`needs_clarification` ya documentado en `HANDOFF_HERMES.md`,
+`"quiero mejorar mi startup, no se muy bien..."`).
+
+**Borrado confirmado por conteo, no por inferencia**: 11 filas
+`requested_by = 'hermes'` antes del borrado, 2 después (exactamente las 9
+esperadas) — las 2 remanentes son las reales de Cafelibro, re-verificadas
+como intactas al final del script. Mismo patrón que la limpieza anterior:
+script ad hoc con `@neondatabase/serverless`, leyendo `.env.local` directo
+(no `source`), borrado al terminar, no commiteado.
+
+## Pendiente cerrado: `GET /runs/:id` ahora expone `error` cuando `status === "failed"` (2026-07-21)
+
+Cierra el pendiente documentado desde la sesión del 2026-07-14 ("Entorno
+local verificado end-to-end") y repetido en "Problemas conocidos /
+pendientes" #4: antes, diagnosticar un run `failed` requería consultar
+`next_action_runs.error` directo en Postgres, porque `serializeRun()`
+(`src/routes/runs.ts`) no lo incluía en la respuesta.
+
+**Fix**: `serializeRun()` agrega `error: run.error ?? null` **solo cuando
+`status === "failed"`** — mismo criterio condicional que ya usa
+`informe_final`/`no_respuesta`/`pregunta` según el estado, sin cambiar el
+contrato para el resto de los estados (el campo simplemente no aparece si
+`status !== "failed"`).
+
+Desplegado a `startup-next.fly.dev` (`flyctl deploy`, sin cambios de
+esquema, solo el campo nuevo en la respuesta serializada).
+
+**Verificado con evidencia real, no solo `tsc` limpio**: script ad hoc
+forzando el especialista `mvp` con una tarea sesgada a MVP hasta obtener
+un `status: "failed"` real (reproduce el mismo bug ya documentado —
+"Capa de reparación...", `resumen_estrategia`/`recomendaciones` mal
+tipados). Confirmado:
+
+- `status: "failed"` → `GET /runs/:id` devuelve `error` con el mensaje
+  real: `"structured output inválido (schema=\"specialistDecisionSchema\"):
+  resumen_estrategia: Invalid input: expected string, received undefined;
+  recomendaciones: Invalid input: expected array, received string..."` —
+  ya no hace falta consultar Postgres directo para verlo.
+- `status: "approved"` (mismo run de prueba, otro intento) → `error`
+  **ausente** de la respuesta (confirmado con
+  `Object.prototype.hasOwnProperty`, no solo `=== undefined`), contrato
+  sin cambios para el resto de los estados.
+
+**Nota sobre el propio arnés de verificación, no del fix**: el script
+(descartado al terminar, no commiteado) tenía un bug real que hizo fallar
+los dos primeros intentos antes de dar evidencia útil — mandaba
+`content-type: application/json` incluso en el `POST /runs/:id/start` sin
+body, y Fastify lo rechaza con `400 FST_ERR_CTP_EMPTY_JSON_BODY` ("Body
+cannot be empty when content-type is set to 'application/json'"). Corregido
+enviando ese header solo cuando el request lleva body. Los runs de prueba
+que este proceso dejó en `next_action_runs` (5 en total, `requested_by`
+`hermes`/`app` según el intento) se borraron al cierre, confirmado por
+conteo (39 → 34 filas), sin afectar las 2 filas reales de Cafelibro.
 
 ## Camino PDF firmado / modo enriquecido cerrado de extremo a extremo (2026-07-19)
 
@@ -160,15 +397,14 @@ Siguiendo `handoff_entorno_pruebas_local.md` (traspaso de otra sesión, ver punt
 
 ## Problemas conocidos / pendientes
 
-1. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real. Confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba): la primera corrida real vía UI falló así, la segunda con el mismo PDF funcionó. **Reconfirmado el 2026-07-19** contra esta producción (`startup-next.fly.dev`) con el camino PDF firmado/modo enriquecido real: mismo patrón exacto (`resumen_estrategia` ausente, `recomendaciones` como string), mismo resultado (reintentar el mismo PDF una vez más dio `approved`). Tercera confirmación real de este patrón, cada vez en un entorno distinto — vale la pena priorizarlo.
+1. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real. Confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba): la primera corrida real vía UI falló así, la segunda con el mismo PDF funcionó. Reconfirmado el 2026-07-19 contra esta producción con el camino PDF firmado/modo enriquecido real. **Reconfirmado una cuarta vez el 2026-07-21**, ahora vía texto libre forzado deliberadamente (ver "Pendiente cerrado: `GET /runs/:id`..." arriba) — mismo patrón exacto (`resumen_estrategia` ausente, `recomendaciones` como string), cada vez en un camino de entrada distinto (UI, PDF firmado, texto libre). Cuatro confirmaciones reales — vale la pena priorizarlo.
 2. `informeParseDecisionSchema` tiene la misma forma de riesgo (array de objetos) que `specialistDecisionSchema` pero no se lo vio fallar hoy — ya tiene la capa de reparación aplicada preventivamente, sin confirmar si hacía falta.
 3. `handoff_startup_next_v2.md` y `handoff_entorno_pruebas_local.md` siguen sin trackear en este y otros repos — ambos son documentos de traspaso generados a propósito al cierre de sesiones anteriores, pensados para copiarse a las carpetas de trabajo al inicio de una sesión nueva. No se commitean (no son código); `handoff_startup_next_v2.md` contiene pendientes adicionales no reflejados aquí (Hermes en suspenso, entrevista de `startup-advisor` terminando abruptamente, excepción de Avast pendiente).
-4. `GET /runs/:id` no expone el campo `error` guardado en `next_action_runs.error` cuando `status === "failed"` (`serializeRun()` en `src/routes/runs.ts`) — hoy hace falta consultar Postgres directo para diagnosticar un run fallido. Candidato simple a agregar.
+4. ~~`GET /runs/:id` no expone el campo `error`...~~ **Resuelto el 2026-07-21** (ver "Pendiente cerrado..." arriba).
 
 ## Próximos pasos sugeridos
 
-1. Dejar correr el sistema un tiempo real y revisar los logs de reparación/fallo del especialista para confirmar o descartar la tensión del ~6% vs. producción real.
+1. Dejar correr el sistema un tiempo real y revisar los logs de reparación/fallo del especialista para confirmar o descartar la tensión del ~6% vs. producción real — ahora con cuatro confirmaciones reales, la prioridad de esto sube.
 2. Considerar si otros especialistas (`financiacion`, `modelo_negocio`, `escalado`, `organizacion`, `administracion` — hoy todos caen en `sin_especialista`) son el próximo módulo a construir, siguiendo el patrón ya probado de `specialist/mvp.ts`.
 3. El endpoint `POST /startups/{id}/individuals` de `ontology-engine` devuelve `500` sin detalle (encontrado el 2026-07-11, no investigado — se evitó usándolo, se usó un `startup_id` ya poblado de antes). Sigue bloqueando probar el modo enriquecido de extremo a extremo. Vale la pena mirarlo si se necesita crear datos de ontología de prueba por API.
 4. Diseñar la interfaz para que Hermes invoque `startup-next` (objetivo final del proyecto según `handoff_entorno_pruebas_local.md`) — el entorno de los tres componentes ya quedó verificado y estable para arrancar esto.
-5. Exponer `error` en la respuesta de `GET /runs/:id` cuando `status === "failed"` (ver pendiente 4 arriba).
