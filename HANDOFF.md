@@ -1,6 +1,69 @@
 # HANDOFF — startup-next (backend)
 
-Última actualización: 2026-07-21.
+Última actualización: 2026-07-23.
+
+## ontology-engine pasa a TBox puro: modo enriquecido retirado por completo (2026-07-23)
+
+Ejecuta el punto 6 (plan de migración) de
+`diseno_ontology_engine_solo_consulta.md`, confirmado con las decisiones
+de las tres preguntas abiertas (Opción C del punto 3, retiro completo del
+PDF firmado, drop de las tablas de ABox). Motivado por la revisión de
+arquitectura de `hermes-startup-next/HANDOFF_CONTEXTO_HISTORICO.md`
+("Revisión de arquitectura (2026-07-21)"): `ontology-engine` deja de tener
+ABox de ninguna startup real — ver `ontology-engine/HANDOFF.md` para el
+borrado de datos (ejecutado antes, sesión separada) y el drop de esquema.
+
+**Callers actualizados primero, servicio después** (orden de migración ya
+acordado, para no romper el servicio compartido a mitad de camino):
+
+### `OntologyContext`/modo enriquecido: eliminado, no solo deshabilitado
+
+`orchestratorModoBase.ts` ya no expone `OntologyContext`/
+`resolveOntologyContext` — no hay ningún modo que resolver, el orquestador
+siempre opera en el único modo que queda (antes llamado "base"). Cambios:
+
+- `src/lib/ontologyEngine.ts`: reescrito para exponer solo
+  `getPrerequisitos`/`Prerequisito` (TBox). `getStartupGraph`,
+  `validateStartup`, `toHallazgosOntologia`, y sus tipos, eliminados —
+  sin caller posible ya que `ontology-engine` retiró esos endpoints.
+- `orchestrator.ts`: `buildUserPrompt`/`resolveConflictoYHallazgos` ya no
+  reciben `OntologyContext` ni ramifican por `mode`. `orchestratorNode` ya
+  no llama a `resolveOntologyContext`.
+- `validator.ts`: `fetchHallazgosOntologia` eliminada (llamaba a
+  `validateStartup`, endpoint retirado). `hallazgosOntologia` es ahora
+  `[]` fijo — ya era efectivamente así en producción desde el borrado del
+  ABox (punto 2, sesión anterior), esto solo retira la llamada de red
+  muerta.
+
+### Mecanismo de firma PDF: retirado por completo
+
+`src/lib/pdfVerification.ts` eliminado. `POST /informes/parse` (camino
+PDF) ya no intenta extraer un `startup_id` real — devuelve
+`crypto.randomUUID()` igual que el camino de texto libre (el `startup_id`
+extraído del PDF nunca tuvo otro consumidor downstream que
+`resolveOntologyContext`, ya eliminado — ver
+`diseno_ontology_engine_solo_consulta.md`, punto 4). `PDF_SIGNING_PUBLIC_KEY`
+retirado de `.env.example` y del secret de Fly (`flyctl secrets unset`).
+
+### Verificación con evidencia real
+
+- `npx tsc --noEmit` y `npm test` (10/10) limpios tras cada cambio.
+- `npm run build` (tsc a `dist/`) limpio.
+- Deploy real a `https://startup-next.fly.dev` (bloqueado primero por el
+  mismo problema de Avast interceptando TLS ya documentado —
+  `x509: certificate signed by unknown authority` contra el builder de
+  Fly/Depot — resuelto pausando Avast, igual que sesiones anteriores).
+- `GET /health` → `200`.
+- Run real completo (`POST /runs` + `/start`) reusando el `startup_id`
+  real de Cafelibros (`4df8de99-...`): `hallazgos_ontologia` con
+  `rule_id: "PREREQUISITO_GENERICO"` (MVP → Experiment → Hypothesis, vía
+  TBox puro), justificación del orquestador citando explícitamente "no
+  hay comentario del asesor ni hechos registrados en la ontología" — sin
+  ninguna rama de "modo enriquecido" en el código para activarse. Run de
+  prueba borrado después de verificar (`next_action_runs` +
+  `next_action_clarifications` en la Neon propia de `startup-next`).
+- `flyctl secrets list` confirma `PDF_SIGNING_PUBLIC_KEY` ausente tras el
+  redeploy.
 
 ## Especialista "ideacion" implementado y desplegado (2026-07-21)
 

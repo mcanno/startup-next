@@ -1,22 +1,17 @@
-// Modo base del orquestador (diseno_startup_next.md, sección 8): cuando
-// ontology-engine no tiene hechos reales de la startup, el orquestador no
-// puede razonar contra hallazgos concretos — cae a preguntarle al TBox en
+// Modo base del orquestador (diseno_startup_next.md, sección 8): desde la
+// conversión de ontology-engine a servicio puramente de consulta (TBox
+// only, ver diseno_ontology_engine_solo_consulta.md), este es el único
+// modo que existe — no hay hechos reales de ninguna startup contra los
+// que razonar, así que el orquestador siempre pregunta al TBox en
 // abstracto ("¿qué precede metodológicamente a esta tarea?") vía
-// GET /concepts/{id}/prerequisitos, ya confirmado funcionando en el paso 1
-// de esta secuencia.
+// GET /concepts/{id}/prerequisitos.
 //
-// Vive separado de orchestrator.ts porque la detección de modo y la
-// segunda llamada LLM de este archivo son un concern propio, no el flujo
-// principal de decidir accion_next.
+// Vive separado de orchestrator.ts porque la segunda llamada LLM de este
+// archivo es un concern propio, no el flujo principal de decidir
+// accion_next.
 
 import { getChatModel, getModoBaseModelConfig } from "../../config/models.js";
-import {
-  getPrerequisitos,
-  getStartupGraph,
-  toHallazgosOntologia,
-  validateStartup,
-  type Prerequisito,
-} from "../../lib/ontologyEngine.js";
+import { getPrerequisitos, type Prerequisito } from "../../lib/ontologyEngine.js";
 import { conceptLabel, relationLabel } from "../../lib/ontologyLabels.js";
 import { invokeStructured } from "../../lib/structuredOutputRetry.js";
 import {
@@ -25,8 +20,6 @@ import {
   type EspecialistaRole,
   type HallazgoOntologia,
 } from "../../schemas.js";
-
-export type OntologyContext = { mode: "enriquecido"; hallazgos: HallazgoOntologia[] } | { mode: "base" };
 
 // Solo 3 de los 7 roles tienen ancla en el TBox hoy (investigación del
 // paso 1): mvp y modelo_negocio son match directo, escalado es una
@@ -39,25 +32,6 @@ const ESPECIALISTA_A_CONCEPTO: Partial<Record<EspecialistaRole, string>> = {
   modelo_negocio: "BusinessModelCanvas",
   escalado: "EngineOfGrowth",
 };
-
-// GET /startups/{id}/graph antes que validate(): individuals.length > 0 es
-// la única señal confiable de "hay hechos reales" (validate() sobre una
-// startup sin individuos también devuelve hallazgos: [] en las 4 reglas —
-// indistinguible de una startup real que cumple todo, ver lib/ontologyEngine.ts).
-// Cualquier error de red/timeout cae a modo base, igual que el catch que ya
-// existía en fetchHallazgosOntologia.
-export async function resolveOntologyContext(startupId: string): Promise<OntologyContext> {
-  try {
-    const graph = await getStartupGraph(startupId);
-    if (graph.individuals.length > 0) {
-      const report = await validateStartup(startupId);
-      return { mode: "enriquecido", hallazgos: toHallazgosOntologia(report) };
-    }
-  } catch {
-    // ontology-engine caído o startup_id inválido: modo base igual.
-  }
-  return { mode: "base" };
-}
 
 export async function getPrerequisitosParaEspecialista(especialista: EspecialistaRole): Promise<Prerequisito[]> {
   const conceptId = ESPECIALISTA_A_CONCEPTO[especialista];

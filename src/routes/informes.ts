@@ -4,7 +4,6 @@ import { z } from "zod";
 import { buildOpcionDesdeTextoLibre, extractOpcionesDesdeTexto } from "../informes/parseOpciones.js";
 import { authenticate } from "../lib/auth.js";
 import { extractTextFromPdf } from "../lib/pdfParser.js";
-import { resolveStartupIdFromPdfText } from "../lib/pdfVerification.js";
 
 const textoLibreBodySchema = z.object({
   texto_libre: z.string().min(1),
@@ -30,9 +29,11 @@ export async function informesRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: "no se pudo extraer texto del PDF" });
       }
 
-      const startupId = resolveStartupIdFromPdfText(texto);
+      // Sin firma que verificar (ontology-engine es TBox puro, sin ABox de
+      // ninguna startup real — ver diseno_ontology_engine_solo_consulta.md):
+      // el PDF nunca aporta un startup_id real, mismo camino que texto libre.
       const opciones = await extractOpcionesDesdeTexto(texto);
-      return reply.code(200).send({ opciones_propuestas: opciones, startup_id: startupId });
+      return reply.code(200).send({ opciones_propuestas: opciones, startup_id: crypto.randomUUID() });
     }
 
     const parsed = textoLibreBodySchema.safeParse(req.body);

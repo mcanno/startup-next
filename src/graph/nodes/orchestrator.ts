@@ -15,8 +15,6 @@ import {
   buildHallazgosPrerequisitoGenerico,
   evaluarConflictoModoBase,
   getPrerequisitosParaEspecialista,
-  resolveOntologyContext,
-  type OntologyContext,
 } from "./orchestratorModoBase.js";
 
 const SYSTEM_PROMPT = `Eres el orquestador de Startup-Next. Tu trabajo es decidir, entre las opciones propuestas por el informe de situación de una startup, cuál es la acción prioritaria a trabajar ahora — sopesando el comentario del asesor humano (si existe) y el estado metodológico real de la startup (hallazgos de la ontología Lean Startup).
@@ -31,7 +29,6 @@ Reglas:
 function buildUserPrompt(
   opciones: OpcionPropuesta[],
   comentario: StartupNextStateType["comentarioAsesor"],
-  ontologyContext: OntologyContext,
   intercambios: string[],
   forzarDecision: boolean,
 ): string {
@@ -52,18 +49,9 @@ function buildUserPrompt(
     partes.push("\nNo hay comentario del asesor — el fundador pide prioridad sin opinión humana.");
   }
 
-  if (ontologyContext.mode === "enriquecido") {
-    partes.push("\nHallazgos activos de la ontología para esta startup:");
-    partes.push(
-      ontologyContext.hallazgos.length > 0
-        ? ontologyContext.hallazgos.map((h) => `- ${h.rule_id}: ${h.hallazgos}`).join("\n")
-        : "(ninguno — no hay reglas activas sobre esta startup ahora mismo)",
-    );
-  } else {
-    partes.push(
-      "\nModo base: no hay hechos reales registrados para esta startup en la ontología. No evalúes conflicto_detectado contra hallazgos — no los hay todavía. Elegí igual la mejor opción según el comentario del asesor y el sentido metodológico general.",
-    );
-  }
+  partes.push(
+    "\nModo base: no hay hechos reales registrados para esta startup en la ontología. No evalúes conflicto_detectado contra hallazgos — no los hay todavía. Elegí igual la mejor opción según el comentario del asesor y el sentido metodológico general.",
+  );
 
   if (intercambios.length > 0) {
     partes.push("\nRondas de aclaración previas con el fundador/Hermes:");
@@ -127,34 +115,14 @@ function buildResultadoPeticionIncoherente(motivoIncoherencia: string | undefine
   };
 }
 
-// Conflicto del comentario del asesor en modo enriquecido viene del mismo
-// LLM call principal (juicio contra hechos reales, sin cambios respecto al
-// Hito 2/3). En modo base no hay hechos contra los que ese juicio tenga
-// sentido — se resuelve aparte, en resolveConflictoYHallazgos.
-function conflictoDesdeDecisionPrincipal(decision: OrchestratorDecision): ConflictoComentarioAsesor {
-  return decision.conflicto_detectado
-    ? {
-        detectado: true,
-        rule_id: decision.conflicto_rule_id ?? "desconocido",
-        descripcion: decision.conflicto_descripcion ?? "",
-      }
-    : { detectado: false };
-}
-
-// Solo en modo base: el concepto ancla depende de especialista_requerido,
-// que recién se conoce después de la decisión principal — por eso
-// prerequisitos y el conflicto contra ellos se resuelven acá, no antes.
+// El concepto ancla depende de especialista_requerido, que recién se
+// conoce después de la decisión principal — por eso prerequisitos y el
+// conflicto contra ellos se resuelven acá, no antes.
 async function resolveConflictoYHallazgos(
-  ontologyContext: OntologyContext,
   decision: OrchestratorDecision,
   accionElegida: { titulo: string; descripcion: string },
   comentarioAsesor: StartupNextStateType["comentarioAsesor"],
-  hallazgosEnriquecido: HallazgoOntologia[],
 ): Promise<{ hallazgos: HallazgoOntologia[]; conflicto: ConflictoComentarioAsesor }> {
-  if (ontologyContext.mode === "enriquecido") {
-    return { hallazgos: hallazgosEnriquecido, conflicto: conflictoDesdeDecisionPrincipal(decision) };
-  }
-
   const especialistaRequerido = decision.especialista_requerido ?? "mvp";
   const prerequisitos = await getPrerequisitosParaEspecialista(especialistaRequerido);
   const hallazgos = buildHallazgosPrerequisitoGenerico(prerequisitos);
@@ -181,8 +149,6 @@ export async function orchestratorNode(
     return {};
   }
 
-  const ontologyContext = await resolveOntologyContext(state.startupId);
-
   const llm = getChatModel(getOrchestratorModelConfig(), { maxTokens: 2048, effort: "medium" }).withStructuredOutput(
     orchestratorDecisionSchema,
     { name: "decidir_accion_next", includeRaw: true },
@@ -197,7 +163,7 @@ export async function orchestratorNode(
         { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
-          content: buildUserPrompt(state.opciones, state.comentarioAsesor, ontologyContext, intercambios, forzarDecision),
+          content: buildUserPrompt(state.opciones, state.comentarioAsesor, intercambios, forzarDecision),
         },
       ]),
     );
@@ -211,13 +177,10 @@ export async function orchestratorNode(
 
     if (!decision.necesita_aclaracion || forzarDecision) {
       const elegido = state.opciones.find((o) => o.id === decision.elegido_id) ?? state.opciones[0];
-      const hallazgosEnriquecido = ontologyContext.mode === "enriquecido" ? ontologyContext.hallazgos : [];
       const { hallazgos, conflicto } = await resolveConflictoYHallazgos(
-        ontologyContext,
         decision,
         { titulo: elegido.titulo, descripcion: elegido.resumen },
         state.comentarioAsesor,
-        hallazgosEnriquecido,
       );
 
       const accionNext = buildAccionNext(decision, state.opciones, hallazgos, conflicto, forzarDecision);

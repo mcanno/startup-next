@@ -1,6 +1,5 @@
 import { getChatModel, getValidatorModelConfig } from "../../config/models.js";
 import type { RetrievedChunk } from "../../db/ragQueries.js";
-import { toHallazgosOntologia, validateStartup } from "../../lib/ontologyEngine.js";
 import { invokeStructured } from "../../lib/structuredOutputRetry.js";
 import {
   validatorDecisionSchema,
@@ -17,15 +16,6 @@ const SYSTEM_PROMPT = `Eres el validador de Startup-Next. Juzgas si el borrador 
 2. coherencia_ontologia: ¿el borrador es coherente con los hallazgos ya conocidos de la ontología para esta startup? Si hay hallazgos activos que el borrador contradice o ignora sin abordarlos, no cumple.
 
 No evalúes calidad de redacción — eso queda diferido hasta que aparezca evidencia real de que hace falta (sección 4). La verificación de fuentes (¿las citas vienen de chunks realmente recuperados?) se resuelve en código, no la juzgues tú.`;
-
-async function fetchHallazgosOntologia(startupId: string): Promise<HallazgoOntologia[]> {
-  try {
-    const report = await validateStartup(startupId);
-    return toHallazgosOntologia(report);
-  } catch {
-    return [];
-  }
-}
 
 // calidad_y_fuentes real: pertenencia de conjunto, hecho determinístico —
 // no vale la pena otra llamada a Claude para verificar algo que el código
@@ -82,7 +72,10 @@ export async function validatorNode(state: StartupNextStateType): Promise<Partia
     { name: "evaluar_ciclo", includeRaw: true },
   );
 
-  const hallazgosOntologia = await fetchHallazgosOntologia(state.startupId);
+  // ontology-engine es TBox puro (sin ABox de ninguna startup real, ver
+  // diseno_ontology_engine_solo_consulta.md) — no hay hallazgos reales
+  // contra los que verificar coherencia.
+  const hallazgosOntologia: HallazgoOntologia[] = [];
 
   const decision = await invokeStructured(validatorDecisionSchema, "validatorDecisionSchema", () =>
     llm.invoke([
