@@ -43,6 +43,7 @@ function extractToolArgs(raw: unknown): Record<string, unknown> | undefined {
 function attemptRepair<T>(
   schema: z.ZodType<T>,
   args: Record<string, unknown>,
+  schemaName: string,
 ): { data: T; repairedFields: string[] } | null {
   const firstPass = schema.safeParse(args);
   if (firstPass.success) return null; // no hacía falta reparar nada
@@ -62,14 +63,31 @@ function attemptRepair<T>(
       repaired[key] = JSON.parse(value);
       repairedFields.push(key);
     } catch {
-      continue; // no era JSON valido, no se puede reparar este campo
+      continue; // no era JSON válido, no se puede reparar este campo
     }
   }
-  if (repairedFields.length === 0) return null;
 
-  const secondPass = schema.safeParse(repaired);
-  if (!secondPass.success) return null;
-  return { data: secondPass.data, repairedFields };
+  const secondPass = repairedFields.length > 0 ? schema.safeParse(repaired) : firstPass;
+  if (secondPass.success) return { data: secondPass.data, repairedFields };
+
+  // No se pudo reparar del todo — loguea un diagnóstico por cada campo
+  // que sigue roto, sin importar la causa exacta (JSON.parse pudo haber
+  // tenido éxito en un campo y el fallo real venir de otro campo distinto
+  // que quedó ausente/mal tipado, o el campo nunca fue JSON válido en
+  // primer lugar): preview (inicio/fin + longitud) si es string, para
+  // distinguir truncamiento (corta a mitad de valor, el final no cierra)
+  // de otras causas, sin guardar el valor completo en logs (ver
+  // diseno_expansion_especialistas.md, hipótesis de maxTokens señalada al
+  // investigar el hallazgo de pmf).
+  for (const key of brokenKeys) {
+    const value = args[key];
+    const detalle =
+      typeof value === "string"
+        ? `longitud=${value.length} inicio="${value.slice(0, 150)}" fin="${value.slice(-150)}"`
+        : `valor=${JSON.stringify(value)}`;
+    console.error(`structured output: campo "${key}" sigue inválido tras reparación (schema="${schemaName}") tipo=${typeof value} ${detalle}`);
+  }
+  return null;
 }
 
 // LangChain no siempre popula parsingError cuando parsed es null (visto en
@@ -107,7 +125,7 @@ export async function invokeStructured<T>(
 
     const args = extractToolArgs(result.raw);
     if (args) {
-      const repair = attemptRepair(schema, args);
+      const repair = attemptRepair(schema, args, schemaName);
       if (repair) {
         // Reparación exitosa: distinto de un éxito normal a propósito, para
         // poder medir con datos reales de producción qué tan seguido pasa

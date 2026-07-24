@@ -123,6 +123,97 @@ verificadas intactas antes y después.
 (capítulos Counter-Positioning, Switching Costs, Branding, Cornered
 Resource), a pedir al usuario cuando le toque el turno.
 
+## Hipótesis de maxTokens/truncamiento: refutada con evidencia directa (2026-07-24, misma sesión)
+
+Comprobación pedida explícitamente sobre la clasificación de arriba, antes
+de construir `escalado` — si la causa fuera truncamiento por `maxTokens`,
+afectaría a los tres especialistas que faltan por igual.
+
+### Paso 1 — valores reales, confirmados por grep
+
+`maxTokens: 2048` es **compartido** por `pmf.ts`, `mvp.ts` e `ideacion.ts`
+(idéntico en los tres, no hay override por especialista). `searchRagChunks`
+recupera **5 chunks por consulta** (default de la función, también
+compartido).
+
+### Paso 2 — captura del output crudo: instrumentación nueva, no un script aparte
+
+`src/lib/structuredOutputRetry.ts` (`attemptRepair`) no dejaba rastro del
+contenido real cuando un campo no era reparable — el error final solo
+tenía el mensaje de Zod, sin el string original. Se agregó logging de
+diagnóstico (permanente, no revertido — bajo costo, solo se activa en el
+camino que ya está fallando, y directamente relevante para seguir
+midiendo "Problemas conocidos" #1 en el futuro): cuando la reparación
+falla, loguea cada campo aún inválido con su tipo y, si es string,
+longitud + preview de inicio/fin (sin guardar el string completo).
+Desplegado, y reproducido disparando la misma tarea de `pmf` repetidas
+veces contra producción hasta capturar fallos reales.
+
+**Output crudo capturado, real, de 5 fallos distintos** — patrón idéntico
+en los 5:
+
+```
+campo "resumen_estrategia" sigue inválido: tipo=undefined valor=undefined
+campo "recomendaciones" sigue inválido: tipo=string longitud=3379
+  inicio="{"resumen_estrategia":"Antes de invertir en crecimiento, usar el checklist..."
+  fin="...],"chunk_ids_citados":["889ce1f9a31a6427d22f5d7e60ec91e26dc6018d562305bf0a4c87013923d207"]}]}"
+```
+
+### Paso 3 — diagnóstico: no es truncamiento, es doble anidamiento completo
+
+El string de `recomendaciones` en los 5 casos capturados **es JSON
+completo y bien formado** (cierra limpio con `}]}`, sin cortar a mitad de
+ningún valor) — **no truncado**. Lo que contiene no es el array esperado:
+es el **objeto entero previsto** (`{"resumen_estrategia": "...",
+"recomendaciones": [...]}`) serializado como string y metido un nivel de
+más adentro del campo `recomendaciones`, dejando `resumen_estrategia`
+completamente ausente en el nivel superior del tool call. El repair layer
+sí intenta `JSON.parse()` sobre ese string y **tiene éxito** (es JSON
+válido) — pero el resultado es un objeto, no un array, así que sigue sin
+cumplir el schema y la reparación falla igual, sin lanzar excepción (por
+eso no aparecía en el log anterior, que solo cubría el `catch` de
+`JSON.parse`).
+
+**Consecuencia directa**: la hipótesis de `maxTokens`/truncamiento queda
+**refutada por evidencia directa**, no por inferencia. No se probó subir
+`maxTokens` como siguiente paso — hacerlo habría sido testear una premisa
+ya descartada por el contenido real capturado (JSON completo y balanceado,
+muy por debajo de 2048 tokens: 2768-4129 caracteres de contenido, ~700-1000
+tokens estimados). Por la misma razón, **limitar el tamaño/número de
+chunks recuperados tampoco es una mitigación relevante para este
+mecanismo** — no es un problema de volumen de contenido, es un problema
+estructural de cómo Claude arma el tool call para este schema puntual (dos
+campos de nivel superior, uno de ellos un array de objetos moderadamente
+complejo) bajo ciertas condiciones todavía no aisladas.
+
+### Frecuencia revisada, con la muestra completa de la sesión
+
+Contando también esta comprobación (18 corridas reales adicionales, no
+solo las 6 de la clasificación anterior): **15 de 18 aprobadas, 3
+fallidas** en este segundo lote — muy distinto del 5-de-6 fallidas del
+primer lote. **Total combinado de la sesión: 24 corridas reales de `pmf`,
+8 fallidas, 16 aprobadas (~33%)**. Sigue muy por encima del ~6% sintético
+medido antes y de la regresión `mvp`/`ideacion` (0 fallos), pero la
+diferencia entre "5 de 6" y "3 de 18" del mismo mecanismo confirma que el
+primer lote fue, en parte, mala suerte de muestra chica — no cambia la
+conclusión de que hay algo elevando la tasa real de `pmf` sobre el
+baseline, pero sí templa cuánto.
+
+### Camino de arreglo con evidencia real, no implementado todavía
+
+Dado que el string roto de `recomendaciones` es, de forma consistente, el
+objeto completo esperado con `resumen_estrategia` anidado adentro, una
+reparación mucho más específica que la actual es viable: si
+`JSON.parse()` del campo roto produce un objeto (no un array) que a su vez
+contiene las claves del schema de nivel superior, promover/desanidar ese
+objeto en vez de descartar la reparación. Esto es un diseño concreto para
+la próxima vez que se abra la investigación completa de "Problemas
+conocidos" #1 — **no implementado en esta sesión**, fuera del alcance
+pedido (solo diagnosticar, no arreglar).
+
+**Limpieza**: 18 runs de esta comprobación borrados al cierre, confirmado
+por conteo (`next_action_runs`: 52 → 34).
+
 ## Clasificación acotada del hallazgo de fallos consecutivos en pmf (2026-07-24, misma sesión)
 
 Comprobación pedida explícitamente, **no la investigación completa del
@@ -646,7 +737,7 @@ Siguiendo `handoff_entorno_pruebas_local.md` (traspaso de otra sesión, ver punt
 
 ## Problemas conocidos / pendientes
 
-1. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real. Confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba): la primera corrida real vía UI falló así, la segunda con el mismo PDF funcionó. Reconfirmado el 2026-07-19 contra esta producción con el camino PDF firmado/modo enriquecido real. **Reconfirmado una cuarta vez el 2026-07-21**, ahora vía texto libre forzado deliberadamente (ver "Pendiente cerrado: `GET /runs/:id`..." arriba) — mismo patrón exacto (`resumen_estrategia` ausente, `recomendaciones` como string), cada vez en un camino de entrada distinto (UI, PDF firmado, texto libre). **Reconfirmado el 2026-07-24 verificando `pmf`, y clasificado con una comprobación acotada aparte** (ver "Clasificación acotada del hallazgo de fallos consecutivos en pmf" arriba): 5 de 6 corridas reales apuntando a `pmf` fallaron con el error byte-por-byte idéntico al ya documentado — mismo sub-tipo, no una categoría nueva, la capa de reparación no puede ayudar (confirmado que ya lo intentó y falló las 5 veces) — pero la frecuencia (~83% en esta muestra) es muy superior al ~6% sintético y a la regresión `mvp`/`ideacion` de la misma sesión (0 fallos), con una hipótesis señalada pero no confirmada de que el contenido recuperado para `pmf` (chunks más largos que la mediana del corpus) correlaciona con el fallo. Seis confirmaciones reales en total — vale la pena priorizarlo con más urgencia, sobre todo investigar la hipótesis de correlación con `pmf` antes de construir `escalado`/`operaciones`/`plataformas` sobre el mismo patrón.
+1. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real. Confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba): la primera corrida real vía UI falló así, la segunda con el mismo PDF funcionó. Reconfirmado el 2026-07-19 contra esta producción con el camino PDF firmado/modo enriquecido real. **Reconfirmado una cuarta vez el 2026-07-21**, ahora vía texto libre forzado deliberadamente (ver "Pendiente cerrado: `GET /runs/:id`..." arriba) — mismo patrón exacto (`resumen_estrategia` ausente, `recomendaciones` como string), cada vez en un camino de entrada distinto (UI, PDF firmado, texto libre). **Reconfirmado el 2026-07-24 verificando `pmf` (24 corridas reales, 8 fallidas, ~33%), y diagnosticado con mecanismo real, no solo síntoma** (ver "Hipótesis de maxTokens/truncamiento: refutada..." y "Clasificación acotada..." arriba, en ese orden): el string roto de `recomendaciones` es JSON **completo y bien formado** (no truncado) que contiene el objeto entero previsto (`resumen_estrategia` + `recomendaciones`) anidado un nivel de más — **no es un problema de `maxTokens` ni de volumen de contenido**, es un problema estructural de cómo Claude arma el tool call para este schema puntual bajo condiciones todavía no aisladas. Queda un camino de arreglo concreto y respaldado por evidencia real, no implementado: si el `JSON.parse()` de un campo roto produce un objeto que contiene las claves del schema de nivel superior (en vez de el array esperado), la capa de reparación podría desanidarlo en vez de descartar la reparación — vale la pena priorizarlo antes de construir `escalado`/`operaciones`/`plataformas` sobre el mismo patrón de especialista.
 2. `informeParseDecisionSchema` tiene la misma forma de riesgo (array de objetos) que `specialistDecisionSchema` pero no se lo vio fallar hoy — ya tiene la capa de reparación aplicada preventivamente, sin confirmar si hacía falta.
 3. `handoff_startup_next_v2.md` y `handoff_entorno_pruebas_local.md` siguen sin trackear en este y otros repos — ambos son documentos de traspaso generados a propósito al cierre de sesiones anteriores, pensados para copiarse a las carpetas de trabajo al inicio de una sesión nueva. No se commitean (no son código); `handoff_startup_next_v2.md` contiene pendientes adicionales no reflejados aquí (Hermes en suspenso, entrevista de `startup-advisor` terminando abruptamente, excepción de Avast pendiente).
 4. ~~`GET /runs/:id` no expone el campo `error`...~~ **Resuelto el 2026-07-21** (ver "Pendiente cerrado..." arriba).
