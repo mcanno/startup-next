@@ -36,6 +36,18 @@ function extractToolArgs(raw: unknown): Record<string, unknown> | undefined {
   return message?.tool_calls?.[0]?.args;
 }
 
+type RepairResult<T> = {
+  data: T;
+  repairedFields: string[];
+  // "campo": reparación previa (Hito 3) — el string de un campo roto
+  // parseaba directo al valor esperado para ESE campo.
+  // "desanidado": caso nuevo (investigación real de pmf, 2026-07-24,
+  // diseno_expansion_especialistas.md) — el string de un campo roto no es
+  // el valor de ese campo, es el objeto COMPLETO de nivel superior
+  // (todos los campos del schema) serializado y anidado un nivel de más.
+  kind: "campo" | "desanidado";
+};
+
 // Repara únicamente los campos que Zod señaló como inválidos (vía
 // error.issues), no cualquier string del objeto al azar — evita tocar
 // campos que legítimamente son texto libre y que por coincidencia
@@ -44,7 +56,7 @@ function attemptRepair<T>(
   schema: z.ZodType<T>,
   args: Record<string, unknown>,
   schemaName: string,
-): { data: T; repairedFields: string[] } | null {
+): RepairResult<T> | null {
   const firstPass = schema.safeParse(args);
   if (firstPass.success) return null; // no hacía falta reparar nada
 
@@ -59,16 +71,36 @@ function attemptRepair<T>(
   for (const key of brokenKeys) {
     const value = repaired[key];
     if (typeof value !== "string") continue;
+
+    let parsedValue: unknown;
     try {
-      repaired[key] = JSON.parse(value);
-      repairedFields.push(key);
+      parsedValue = JSON.parse(value);
     } catch {
       continue; // no era JSON válido, no se puede reparar este campo
     }
+
+    // Caso "desanidado": el contenido parseado no es el valor de ESTE
+    // campo, es un objeto que, tal cual, ya satisface el schema COMPLETO
+    // de nivel superior (Claude metió todo un nivel de más adentro de un
+    // solo campo). Se comprueba de forma genérica contra el schema
+    // entero, no contra ningún nombre de campo hardcodeado — aplica a
+    // cualquiera de los 5 nodos LLM-facing que usan esta capa, no solo a
+    // specialistDecisionSchema. Conservador: si no valida completo, no se
+    // fuerza nada, cae al camino normal de abajo (reparación campo a
+    // campo, y de ahí al reintento si tampoco alcanza).
+    if (parsedValue !== null && typeof parsedValue === "object" && !Array.isArray(parsedValue)) {
+      const unwrapped = schema.safeParse(parsedValue);
+      if (unwrapped.success) {
+        return { data: unwrapped.data, repairedFields: [key], kind: "desanidado" };
+      }
+    }
+
+    repaired[key] = parsedValue;
+    repairedFields.push(key);
   }
 
   const secondPass = repairedFields.length > 0 ? schema.safeParse(repaired) : firstPass;
-  if (secondPass.success) return { data: secondPass.data, repairedFields };
+  if (secondPass.success) return { data: secondPass.data, repairedFields, kind: "campo" };
 
   // No se pudo reparar del todo — loguea un diagnóstico por cada campo
   // que sigue roto, sin importar la causa exacta (JSON.parse pudo haber
@@ -130,10 +162,12 @@ export async function invokeStructured<T>(
         // Reparación exitosa: distinto de un éxito normal a propósito, para
         // poder medir con datos reales de producción qué tan seguido pasa
         // esto (la medición de ~6% de hoy fue con prompts sintéticos, no con
-        // el accion_next real armado por el orquestador).
-        console.warn(
-          `structured output reparado sin reintento: schema="${schemaName}" campos=[${repair.repairedFields.join(", ")}]`,
-        );
+        // el accion_next real armado por el orquestador) — y con el "kind"
+        // en el mensaje mismo para poder medir por separado cuál de los dos
+        // caminos de reparación actúa con qué frecuencia.
+        const etiqueta =
+          repair.kind === "desanidado" ? "reparado sin reintento (desanidado)" : "reparado sin reintento";
+        console.warn(`structured output ${etiqueta}: schema="${schemaName}" campos=[${repair.repairedFields.join(", ")}]`);
         return repair.data;
       }
     }

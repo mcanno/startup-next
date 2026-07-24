@@ -123,6 +123,100 @@ verificadas intactas antes y después.
 (capítulos Counter-Positioning, Switching Costs, Branding, Cornered
 Resource), a pedir al usuario cuando le toque el turno.
 
+## Fix del sub-tipo "desanidado" en la capa de reparación (2026-07-24, misma sesión, continuación directa)
+
+Implementa el camino de arreglo identificado en la investigación anterior
+("Hipótesis de maxTokens..." más abajo): cuando `JSON.parse()` de un
+campo roto produce un **objeto** (no el array/tipo esperado para ese
+campo) que **ya satisface el schema completo de nivel superior**, se
+desanida y se usa directo — en vez de descartarlo como irreparable y
+gastar un reintento.
+
+### Implementación: genérica, sin nombres de campo hardcodeados
+
+`attemptRepair()` (`src/lib/structuredOutputRetry.ts`) ahora, para cada
+campo roto cuyo `JSON.parse()` tenga éxito, comprueba primero
+`schema.safeParse(parsedValue)` contra el **schema entero** — si eso
+valida, retorna inmediato con `kind: "desanidado"`. Si no valida (el caso
+común: el parseo simplemente da el valor correcto para ESE campo, la
+reparación de siempre), sigue el camino ya existente (`kind: "campo"`).
+Aplica a los 5 nodos LLM-facing por igual — no hay ninguna referencia a
+`specialistDecisionSchema` ni a `resumen_estrategia`/`recomendaciones` en
+el código nuevo.
+
+**Conservador, tal como se pidió**: si el objeto parseado no valida
+completo contra el schema, no se fuerza nada — cae al camino de reparación
+campo-a-campo de siempre, y de ahí al reintento normal si tampoco alcanza.
+Nunca se reconstruye a ciegas (mismo principio ya aplicado a JSON
+genuinamente corrupto).
+
+**Logueado de forma distinguible**: `console.warn` en `invokeStructured()`
+ahora dice `"reparado sin reintento (desanidado)"` para este caso nuevo,
+vs. `"reparado sin reintento"` (sin sufijo) para la reparación campo-a-campo
+ya existente — se puede medir por separado cuál actúa con qué frecuencia
+en los logs de producción.
+
+### Verificación offline: 5 capturas reales, no sintéticas
+
+Antes de escribir el fix, se capturó contenido real de fallo (no solo el
+preview de antes): instrumentación temporal (volcado completo del campo
+roto, revertida después) desplegada, disparando la tarea de `pmf` que
+fallaba hasta obtener 5 capturas reales completas desde `flyctl logs`. Las
+5 son JSON válido, con exactamente las claves `resumen_estrategia` +
+`recomendaciones` del schema completo — confirma la hipótesis de
+"desanidado" con evidencia directa, no solo la muestra parcial (preview)
+de la sesión anterior.
+
+Estas 5 capturas quedan como fixtures reales en
+`tests/lib/fixtures/capturedNestedPayloads.ts` (nuevo) y se testean
+offline en `tests/lib/structuredOutputRetry.test.ts` (nuevo, 8 tests):
+las 5 reparan correctamente vía `invokeStructured` sin gastar reintento
+(`call` mockeado, se verifica `toHaveBeenCalledTimes(1)`), más 3 casos de
+control — la reparación campo-a-campo previa sigue funcionando sin
+cambios, un objeto parseado que NO satisface el schema completo no se
+fuerza (cae a los 3 reintentos), y JSON genuinamente corrupto (no
+parseable) sigue sin repararse a propósito. `npx tsc --noEmit` y
+`npm test` limpios: 18/18 (10 preexistentes + 8 nuevos).
+
+### Verificación real contra producción: 12/12 aprobadas, con el nuevo camino confirmado activo por logs
+
+Desplegado. Se repitió la misma tarea de `pmf` que fallaba (~33-50% de
+fallo medido en la sesión anterior) **12 veces reales, concurrentes**:
+**12 de 12 aprobadas, 0 fallos**. `flyctl logs` confirma que **8 de las
+12** dispararon el mensaje nuevo `"reparado sin reintento (desanidado)"`
+— es decir, 8 de esas 12 corridas habrían fallado bajo la lógica anterior
+(coincide con la tasa alta ya medida) y el fix las recuperó en el momento,
+sin gastar ningún reintento. No es solo que "no falló" — hay evidencia
+directa de que el camino nuevo se activó y por qué.
+
+### Regresión de `mvp`/`ideacion`: bloqueada por un problema externo, no por el fix
+
+Al intentar la regresión pedida (Cafelibro real + `mvp` con texto libre),
+ambos runs fallaron/nunca arrancaron con:
+
+```
+400 {"type":"error","error":{"type":"invalid_request_error","message":
+"Your credit balance is too low to access the Anthropic API. Please go
+to Plans & Billing to upgrade or purchase credits."}}
+```
+
+**No es una regresión del fix** — es que el volumen real de esta sesión
+(las decenas de corridas de las tres comprobaciones encadenadas:
+clasificación, hipótesis de `maxTokens`, y esta) agotó el saldo de la
+cuenta de Anthropic. Confirmado reintentando `POST /runs/{id}/start` del
+run de `mvp` (mismo error, no transitorio). **Pendiente real, no cerrado
+en esta sesión**: repetir la regresión de `mvp`/`ideacion` (Cafelibro)
+contra producción en cuanto se recargue el saldo — el fix en sí ya tiene
+evidencia sólida propia (offline + 12/12 reales), pero la regresión de los
+2 especialistas existentes sigue sin confirmar contra esta versión exacta
+del código.
+
+**Limpieza**: los 24 runs de prueba de esta comprobación (10 de captura +
+12 de verificación post-fix + 2 de regresión fallida/nunca-arrancada)
+borrados al cierre, confirmado por conteo en dos pasos
+(`next_action_runs`: 58 → 44 → 34). Las 2 filas reales de Cafelibro
+verificadas intactas.
+
 ## Hipótesis de maxTokens/truncamiento: refutada con evidencia directa (2026-07-24, misma sesión)
 
 Comprobación pedida explícitamente sobre la clasificación de arriba, antes
@@ -737,7 +831,7 @@ Siguiendo `handoff_entorno_pruebas_local.md` (traspaso de otra sesión, ver punt
 
 ## Problemas conocidos / pendientes
 
-1. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real. Confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba): la primera corrida real vía UI falló así, la segunda con el mismo PDF funcionó. Reconfirmado el 2026-07-19 contra esta producción con el camino PDF firmado/modo enriquecido real. **Reconfirmado una cuarta vez el 2026-07-21**, ahora vía texto libre forzado deliberadamente (ver "Pendiente cerrado: `GET /runs/:id`..." arriba) — mismo patrón exacto (`resumen_estrategia` ausente, `recomendaciones` como string), cada vez en un camino de entrada distinto (UI, PDF firmado, texto libre). **Reconfirmado el 2026-07-24 verificando `pmf` (24 corridas reales, 8 fallidas, ~33%), y diagnosticado con mecanismo real, no solo síntoma** (ver "Hipótesis de maxTokens/truncamiento: refutada..." y "Clasificación acotada..." arriba, en ese orden): el string roto de `recomendaciones` es JSON **completo y bien formado** (no truncado) que contiene el objeto entero previsto (`resumen_estrategia` + `recomendaciones`) anidado un nivel de más — **no es un problema de `maxTokens` ni de volumen de contenido**, es un problema estructural de cómo Claude arma el tool call para este schema puntual bajo condiciones todavía no aisladas. Queda un camino de arreglo concreto y respaldado por evidencia real, no implementado: si el `JSON.parse()` de un campo roto produce un objeto que contiene las claves del schema de nivel superior (en vez de el array esperado), la capa de reparación podría desanidarlo en vez de descartar la reparación — vale la pena priorizarlo antes de construir `escalado`/`operaciones`/`plataformas` sobre el mismo patrón de especialista.
+1. **Sub-tipo "desanidado" (objeto completo anidado un nivel de más): arreglado y verificado el 2026-07-24** — ver "Fix del sub-tipo 'desanidado'..." arriba. Historial hasta ahí: confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba), reconfirmado el 2026-07-19 (PDF firmado/modo enriquecido), reconfirmado el 2026-07-21 (texto libre forzado), reconfirmado y diagnosticado el 2026-07-24 verificando `pmf` (24 corridas, 8 fallidas, ~33% — ver "Hipótesis de maxTokens..." y "Clasificación acotada..." arriba). `attemptRepair()` ahora detecta este patrón específico (el `JSON.parse()` de un campo roto produce un objeto que ya satisface el schema completo de nivel superior) y lo desanida en vez de descartarlo — verificado offline con 5 capturas reales (`tests/lib/structuredOutputRetry.test.ts`) y en producción (12/12 aprobadas, 8 de ellas vía el nuevo camino, confirmado por logs). **Sigue sin cobertura, a propósito, la otra cara del sub-tipo 2**: JSON genuinamente corrupto que ni siquiera `JSON.parse()` puede parsear (comillas mal cerradas a mitad, contenido truncado de verdad) — ese caso no se toca, mismo criterio de "no reconstruir a ciegas" ya aplicado desde el principio. **Pendiente real, no cerrado en esta sesión**: la regresión de `mvp`/`ideacion` (Cafelibro) contra esta versión exacta del código quedó bloqueada por saldo agotado de la API de Anthropic (`400 credit balance too low`) — repetirla en cuanto se recargue el saldo, antes de dar el fix por completamente cerrado.
 2. `informeParseDecisionSchema` tiene la misma forma de riesgo (array de objetos) que `specialistDecisionSchema` pero no se lo vio fallar hoy — ya tiene la capa de reparación aplicada preventivamente, sin confirmar si hacía falta.
 3. `handoff_startup_next_v2.md` y `handoff_entorno_pruebas_local.md` siguen sin trackear en este y otros repos — ambos son documentos de traspaso generados a propósito al cierre de sesiones anteriores, pensados para copiarse a las carpetas de trabajo al inicio de una sesión nueva. No se commitean (no son código); `handoff_startup_next_v2.md` contiene pendientes adicionales no reflejados aquí (Hermes en suspenso, entrevista de `startup-advisor` terminando abruptamente, excepción de Avast pendiente).
 4. ~~`GET /runs/:id` no expone el campo `error`...~~ **Resuelto el 2026-07-21** (ver "Pendiente cerrado..." arriba).
