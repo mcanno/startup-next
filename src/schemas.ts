@@ -44,11 +44,10 @@ export type ConflictoComentarioAsesor = z.infer<typeof conflictoComentarioAsesor
 export const especialistaRoleSchema = z.enum([
   "ideacion",
   "mvp",
-  "financiacion",
-  "modelo_negocio",
+  "pmf",
+  "operaciones",
   "escalado",
-  "organizacion",
-  "administracion",
+  "plataformas",
 ]);
 export type EspecialistaRole = z.infer<typeof especialistaRoleSchema>;
 

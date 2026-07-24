@@ -1,6 +1,127 @@
 # HANDOFF — startup-next (backend)
 
-Última actualización: 2026-07-23.
+Última actualización: 2026-07-24.
+
+## Especialista "pmf" implementado y desplegado — primer paso de la expansión 2→6 (2026-07-24)
+
+Ejecuta el primer especialista de `diseno_expansion_especialistas.md`
+(confirmado con las 3 decisiones abiertas resueltas: mapeo completo de los
+7 capítulos de *7 Powers*, ancla `BusinessModelCanvas` reasignada a
+`ideacion`, y los 63 chunks de confianza media de `guia-canvas.jsonl`
+**no** re-etiquetados para `operaciones` por ahora). Orden confirmado:
+`pmf` → `escalado` → `operaciones` → `plataformas`, un especialista a la
+vez. `pmf` arrancó primero por ser el único con fuente principal ya en el
+corpus (fases de validación de clientes de Customer Development) — sin
+esperar ninguna ingesta nueva.
+
+### Taxonomía: enum de 7 roles a 6, cerrado por schema
+
+`especialistaRoleSchema` (`src/schemas.ts`) pasa de `["ideacion", "mvp",
+"financiacion", "modelo_negocio", "escalado", "organizacion",
+"administracion"]` a `["ideacion", "mvp", "pmf", "operaciones", "escalado",
+"plataformas"]`. `financiacion`/`administracion`/`modelo_negocio`/
+`organizacion` quedan estructuralmente irrepresentables — el orquestador
+no puede emitirlos nunca más, no solo caen a `sin_especialista` en tiempo
+de ejecución.
+
+### `ESPECIALISTAS_IMPLEMENTADOS`: fuente única para evitar la clase de bug del hardcode ya conocida
+
+`src/graph/especialistasImplementados.ts` (nuevo) — `Set` compartido entre
+`orchestrator.ts` (`especialista_disponible`) y `specialist.ts`
+(dispatch), hoy `{"ideacion", "mvp", "pmf"}`. Evita repetir la lista de
+roles implementados en más de un lugar — la duplicación ya causó un bug
+real una vez (`validator.ts` hardcodeaba `"mvp"` mientras `orchestrator.ts`/
+`specialist.ts` ya reconocían `"ideacion"`, ver
+`diseno_especialista_ideacion.md`, punto 5.4). `specialist.ts` pasa de un
+ternario de 2 ramas a un `switch` con un `default` que lanza explícito
+(en vez de asumir `mvp`) si algún día el invariante de arriba se rompe.
+
+### `orchestrator.ts`: prompt reescrito con fronteras explícitas para los 6 roles
+
+La línea única de roles (`SYSTEM_PROMPT`) pasa a una lista con la frontera
+de una frase por rol, versionada — mismo criterio ya usado en
+`hermes-startup-next` para el criterio de selección de contexto histórico
+("el criterio no debe quedar implícito"). Texto completo en
+`diseno_expansion_especialistas.md`, Punto 5.
+
+### `orchestratorModoBase.ts`: `ESPECIALISTA_A_CONCEPTO` reasignado
+
+`modelo_negocio: "BusinessModelCanvas"` (rol eliminado) pasa a `ideacion:
+"BusinessModelCanvas"` — `ideacion` cubre BMC explícitamente en la
+taxonomía nueva. `escalado: "EngineOfGrowth"` sin cambios (sigue sin
+especialista implementado). `pmf`/`operaciones`/`plataformas` sin ancla,
+mismo criterio que `ideacion` en su momento: sin evidencia real de que un
+concepto nuevo del TBox haga falta.
+
+### `src/specialist/pmf.ts` (nuevo)
+
+Mismo patrón exacto que `ideacion.ts`/`mvp.ts`, reusa
+`specialistDecisionSchema` sin cambios. `SYSTEM_PROMPT` propio: encaje
+producto-mercado con clientes reales ya existentes (desarrollo de clientes
+en fase de validación, Jobs To Be Done) — explícitamente no construcción
+de producto (`mvp`) ni escalado.
+
+### Re-etiquetado del corpus: 309 chunks de `customer-development.jsonl`
+
+Aditivo (`["mvp", "pmf"]`, no exclusivo), mismo criterio que `ideacion`.
+Candidatos identificados por título de capítulo, alta confianza: "Una
+introducción a la validación de clientes" (65), "Validación de clientes,
+fase 2:" (22), "Validación de clientes, fase 3: Desarrollar el
+posicionamiento de la empresa y del producto" (222).
+
+**Verificado con evidencia real, no solo por el `.jsonl`**:
+`rag-ingest load` bloqueado localmente en su paso de verificación (llamada
+a Voyage AI) por Avast interceptando TLS — mismo problema documentado en
+sesiones anteriores. El upsert a Postgres en sí (`upsert_chunks`/
+`resync_book`) no depende de esa llamada y se confirmó exitoso por su
+propio log (`778 chunks upserteados, 0 huérfanos eliminados`, repetido
+igual dos veces). Verificación independiente por SQL directo:
+`especialista_tags` → `['mvp']` 610, `['mvp','pmf']` 309 (exacto),
+`['mvp','ideacion']` 207 (sin cambios) — total sigue en 1.126, 0 chunks con
+`embedding IS NULL`.
+
+### Deploy y verificación real contra producción
+
+`flyctl deploy` falló primero por el mismo problema de Avast/TLS contra el
+builder remoto de Fly (`x509: certificate signed by unknown authority`) —
+resuelto pausando Avast (confirmado por el usuario). `GET /health` → `200`
+tras el redeploy.
+
+**Caso `pmf`** (texto libre, "40 clientes pagando... validar si existe
+encaje producto-mercado real..."): las primeras 3 corridas terminaron en
+`failed` con el mismo error ya documentado en "Problemas conocidos /
+pendientes" #1 (`resumen_estrategia` ausente, `recomendaciones` como
+string) — **anotado como observación, no una causa nueva**: 3 fallos
+consecutivos con esta tarea puntual es un dato llamativo frente a la tasa
+sintética ~6% ya medida, pero el código de `pmf.ts` se confirmó idéntico
+en estructura a `ideacion.ts`/`mvp.ts` (sin bug introducido), y una cuarta
+corrida con una redacción de tarea distinta (mismo contenido temático)
+resolvió `approved` en el primer intento — consistente con el bug
+cross-cutting ya conocido, no un problema nuevo de `pmf`. Resultado final:
+`especialista_usado: "pmf"`, 5 recomendaciones, fuentes citadas
+efectivamente del corpus recién re-etiquetado (`"Validación de clientes,
+fase 3..."`, `"Introducción a la validación de clientes..."`) — confirma
+que el re-etiquetado no solo cuenta bien en la base sino que el
+especialista lo recupera y cita.
+
+**Regresión de `mvp`/`ideacion`** (obligatoria por ser prompt compartido,
+Punto 6 del diseño): `ideacion` reinvocado contra Cafelibro real
+(`4df8de99-...`, misma tarea real del 2026-07-19) → `especialista_usado:
+"ideacion"`, `approved`, fuentes de Customer Development/Guía Canvas sin
+contaminación de chunks `pmf`. `mvp` con texto libre nuevo ("ya validamos
+el problema... construir un prototipo mínimo viable...") → `especialista_usado:
+"mvp"`, `approved`. Sin regresión por el cambio de prompt compartido.
+
+**Limpieza**: 6 runs de prueba (3 `pmf` fallidos, 1 `pmf` aprobado, 1
+regresión `ideacion`, 1 regresión `mvp`) borrados al cierre, confirmado
+por conteo (`next_action_runs`: 40 → 34). Las 2 filas reales de Cafelibro
+verificadas intactas antes y después.
+
+### Próximo paso
+
+`escalado`, según el orden confirmado — requiere el PDF de *7 Powers*
+(capítulos Counter-Positioning, Switching Costs, Branding, Cornered
+Resource), a pedir al usuario cuando le toque el turno.
 
 ## ontology-engine pasa a TBox puro: modo enriquecido retirado por completo (2026-07-23)
 
@@ -460,7 +581,7 @@ Siguiendo `handoff_entorno_pruebas_local.md` (traspaso de otra sesión, ver punt
 
 ## Problemas conocidos / pendientes
 
-1. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real. Confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba): la primera corrida real vía UI falló así, la segunda con el mismo PDF funcionó. Reconfirmado el 2026-07-19 contra esta producción con el camino PDF firmado/modo enriquecido real. **Reconfirmado una cuarta vez el 2026-07-21**, ahora vía texto libre forzado deliberadamente (ver "Pendiente cerrado: `GET /runs/:id`..." arriba) — mismo patrón exacto (`resumen_estrategia` ausente, `recomendaciones` como string), cada vez en un camino de entrada distinto (UI, PDF firmado, texto libre). Cuatro confirmaciones reales — vale la pena priorizarlo.
+1. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real. Confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba): la primera corrida real vía UI falló así, la segunda con el mismo PDF funcionó. Reconfirmado el 2026-07-19 contra esta producción con el camino PDF firmado/modo enriquecido real. **Reconfirmado una cuarta vez el 2026-07-21**, ahora vía texto libre forzado deliberadamente (ver "Pendiente cerrado: `GET /runs/:id`..." arriba) — mismo patrón exacto (`resumen_estrategia` ausente, `recomendaciones` como string), cada vez en un camino de entrada distinto (UI, PDF firmado, texto libre). **Reconfirmado una quinta vez el 2026-07-24**, verificando el especialista `pmf` recién implementado — 3 corridas consecutivas con la misma tarea fallaron con el patrón idéntico, la cuarta (misma intención, redacción distinta) resolvió `approved` a la primera. Cinco confirmaciones reales — 3 fallos seguidos con la misma tarea es un dato más llamativo que la tasa sintética ~6% ya medida, vale la pena priorizarlo con más urgencia.
 2. `informeParseDecisionSchema` tiene la misma forma de riesgo (array de objetos) que `specialistDecisionSchema` pero no se lo vio fallar hoy — ya tiene la capa de reparación aplicada preventivamente, sin confirmar si hacía falta.
 3. `handoff_startup_next_v2.md` y `handoff_entorno_pruebas_local.md` siguen sin trackear en este y otros repos — ambos son documentos de traspaso generados a propósito al cierre de sesiones anteriores, pensados para copiarse a las carpetas de trabajo al inicio de una sesión nueva. No se commitean (no son código); `handoff_startup_next_v2.md` contiene pendientes adicionales no reflejados aquí (Hermes en suspenso, entrevista de `startup-advisor` terminando abruptamente, excepción de Avast pendiente).
 4. ~~`GET /runs/:id` no expone el campo `error`...~~ **Resuelto el 2026-07-21** (ver "Pendiente cerrado..." arriba).

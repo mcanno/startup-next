@@ -21,15 +21,18 @@ import {
   type HallazgoOntologia,
 } from "../../schemas.js";
 
-// Solo 3 de los 7 roles tienen ancla en el TBox hoy (investigación del
-// paso 1): mvp y modelo_negocio son match directo, escalado es una
-// aproximación ya señalada como tal. Los otros 4 quedan sin mapear a
-// propósito — GET /concepts/{id}/prerequisitos ya devuelve [] con gracia
-// para un concept_id que no existe, así que no hace falta manejarlos como
-// caso especial acá.
+// 3 de los 6 roles tienen ancla en el TBox hoy (diseno_expansion_especialistas.md,
+// Punto 5): mvp es match directo, ideacion hereda el ancla BusinessModelCanvas
+// del antiguo rol modelo_negocio (ya fuera de la taxonomía — ideacion cubre
+// BMC explícitamente ahora), escalado es una aproximación ya señalada como
+// tal (EngineOfGrowth). pmf, operaciones y plataformas quedan sin mapear a
+// propósito — sin evidencia real de que un concepto nuevo del TBox haga
+// falta. GET /concepts/{id}/prerequisitos ya devuelve [] con gracia para un
+// concept_id que no existe, así que no hace falta manejarlos como caso
+// especial acá.
 const ESPECIALISTA_A_CONCEPTO: Partial<Record<EspecialistaRole, string>> = {
+  ideacion: "BusinessModelCanvas",
   mvp: "MVP",
-  modelo_negocio: "BusinessModelCanvas",
   escalado: "EngineOfGrowth",
 };
 

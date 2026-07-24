@@ -16,6 +16,7 @@ import {
   evaluarConflictoModoBase,
   getPrerequisitosParaEspecialista,
 } from "./orchestratorModoBase.js";
+import { ESPECIALISTAS_IMPLEMENTADOS } from "../especialistasImplementados.js";
 
 const SYSTEM_PROMPT = `Eres el orquestador de Startup-Next. Tu trabajo es decidir, entre las opciones propuestas por el informe de situación de una startup, cuál es la acción prioritaria a trabajar ahora — sopesando el comentario del asesor humano (si existe) y el estado metodológico real de la startup (hallazgos de la ontología Lean Startup).
 
@@ -24,7 +25,13 @@ Reglas:
 - La ontología es una restricción dura: si el comentario del asesor sugiere priorizar una dirección que contradice un hallazgo activo de la ontología, no la adoptes sin más — marca el conflicto explícitamente (conflicto_detectado, conflicto_rule_id, conflicto_descripcion) y prioriza igual según el estado metodológico.
 - Si hay ambigüedad real (opciones empatadas en importancia, comentario del asesor ambiguo o contradictorio consigo mismo), no fuerces una elección: pide una aclaración con necesita_aclaracion=true y una pregunta concreta.
 - Si se te indica que ya no quedan rondas de aclaración disponibles, tienes que resolver igual con la información que tengas — no vuelvas a pedir una aclaración.
-- especialista_requerido debe ser el rol que mejor atiende la acción elegida: ideacion, mvp, financiacion, modelo_negocio, escalado, organizacion, o administracion.`;
+- especialista_requerido debe ser el rol que mejor atiende la acción elegida, según estas fronteras:
+  - ideacion: el problema, el cliente o el segmento todavía no están validados, o la tarea es diseñar/ajustar el modelo de negocio (Business Model Canvas) en su forma inicial — antes de construir nada.
+  - mvp: construir y probar una primera versión real del producto (prototipado, experimentos, métricas), incluyendo decisiones de diseño sobre economías de escala del producto en sí — no todavía escalar el negocio.
+  - pmf: ya existe un producto y clientes reales; la tarea es validar o mejorar el encaje producto-mercado (desarrollo de clientes en fase de validación, Jobs To Be Done) — no construir el producto por primera vez (eso es mvp) ni escalar (eso es escalado).
+  - operaciones: cómo se organiza y ejecuta el trabajo interno una vez el negocio funciona (procesos, estructura, adopción de IA en la operación) — no la estrategia de crecimiento externo (escalado) ni la validación de mercado (pmf).
+  - escalado: crecer de forma defendible una vez hay encaje producto-mercado (motor de crecimiento, contraposicionamiento, recursos protegidos) — no la operación interna del día a día (operaciones).
+  - plataformas: el negocio en sí es una plataforma (dos o más lados de mercado, efectos de red, problema del huevo y la gallina). Es transversal: si la tarea trata específicamente la dinámica de plataforma (precios multi-lado, arranque de red), elegí plataformas aunque la startup también esté en fase de ideación o escalado; si no, clasificá por fase como de costumbre aunque el negocio sea una plataforma.`;
 
 function buildUserPrompt(
   opciones: OpcionPropuesta[],
@@ -87,7 +94,7 @@ function buildAccionNext(
     hallazgos_ontologia: hallazgosOntologia,
     conflicto_comentario_asesor: conflicto,
     especialista_requerido: especialistaRequerido,
-    especialista_disponible: especialistaRequerido === "mvp" || especialistaRequerido === "ideacion",
+    especialista_disponible: ESPECIALISTAS_IMPLEMENTADOS.has(especialistaRequerido),
     ...(resueltoSinAclaracionCompleta ? { resuelto_sin_aclaracion_completa: true } : {}),
   };
 }
