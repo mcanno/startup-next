@@ -123,6 +123,71 @@ verificadas intactas antes y después.
 (capítulos Counter-Positioning, Switching Costs, Branding, Cornered
 Resource), a pedir al usuario cuando le toque el turno.
 
+## Clasificación acotada del hallazgo de fallos consecutivos en pmf (2026-07-24, misma sesión)
+
+Comprobación pedida explícitamente, **no la investigación completa del
+bug** (eso sigue en "Problemas conocidos / pendientes" #1, sin resolver):
+solo determinar si los 3 fallos consecutivos vistos al verificar `pmf` son
+una categoría de fallo distinta (determinística, ligada al contenido
+concreto) o la misma ~6% probabilística ya medida, y si eso cambia si la
+capa de reparación (`structuredOutputRetry.ts`) puede ayudar.
+
+**Dos pruebas adicionales, con evidencia real**:
+
+1. **Misma tarea que falló 3 veces, reintentada una cuarta vez** (texto
+   idéntico, nuevo `run_id`) → **falló de nuevo**, con el error
+   `GET /runs/:id` **byte por byte idéntico** a los 3 anteriores:
+   `resumen_estrategia: Invalid input: expected string, received
+   undefined; recomendaciones: Invalid input: expected array, received
+   string; recomendaciones: Too big: expected string to have <=6
+   characters`. 4 de 4 con esta tarea puntual.
+2. **Tarea distinta, redactada de cero, mismo tema** ("Llevamos medio año
+   vendiendo... muchos cancelan a los pocos meses... revisando el
+   posicionamiento frente a alternativas...") → **también falló**, con el
+   mismo error byte por byte idéntico. Esto descarta que el problema esté
+   ligado a la redacción textual exacta de una única tarea — no es
+   determinismo por texto de entrada literal.
+
+**Total de la sesión, contando las corridas de verificación original**: 5
+de 6 corridas reales apuntando a `pmf` fallaron (una sola, con una tercera
+redacción distinta, resolvió `approved` a la primera) — **~83% de fallo en
+esta muestra**, muy por encima del ~6% sintético medido antes, y muy por
+encima de la regresión `mvp`/`ideacion` de la misma sesión (0 fallos en 2
+corridas).
+
+### Clasificación
+
+**No es una categoría nueva de fallo** — el error es textualmente idéntico
+al ya documentado en "Problemas conocidos / pendientes" #1, y corresponde
+específicamente al **segundo sub-tipo ya señalado ahí** ("a veces el
+string de `recomendaciones` no es JSON válido... `JSON.parse()` tira
+excepción y la reparación correctamente no lo toca"): si la capa de
+reparación hubiera podido arreglarlo con `JSON.parse()`, el run habría
+resuelto en silencio sin `error` visible (ver `structuredOutputRetry.ts`,
+`attemptRepair`) — que el error llegue hasta `GET /runs/:id` en los 5
+casos confirma que la reparación ya se intentó y falló las 5 veces. **La
+capa de reparación actual no puede ayudar acá, tal como ya estaba
+documentado** — esto no es un hallazgo nuevo sobre su cobertura.
+
+**Lo que sí es nuevo**: la frecuencia. No es puramente determinística (1
+de 6 corridas con contenido temáticamente equivalente sí funcionó a la
+primera), pero tampoco se parece al ~6% independiente por llamada ya
+medido — algo del **contenido recuperado** para consultas de `pmf`
+(no de la redacción de la tarea, descartado por la prueba 2) parece
+correlacionar con una tasa de fallo mucho más alta. **Hipótesis señalada,
+no investigada** (fuera del alcance pedido de esta comprobación): los
+chunks de `customer-development.jsonl` re-etiquetados para `pmf` tienen
+más varianza de longitud que la mediana del corpus (máximo real 5.690
+caracteres frente a una mediana de 337, ver script de verificación de esta
+misma sesión) — cabría que las consultas de `pmf` recuperen con más
+frecuencia chunks largos que empujan el contexto/la respuesta cerca del
+límite de `maxTokens=2048`, aumentando el riesgo de truncamiento/
+corrupción del campo `recomendaciones`. No confirmado — queda como pista
+para una futura sesión que sí abra la investigación completa.
+
+**Limpieza**: los 2 runs de esta comprobación borrados al cierre,
+confirmado por conteo (`next_action_runs`: 36 → 34).
+
 ## ontology-engine pasa a TBox puro: modo enriquecido retirado por completo (2026-07-23)
 
 Ejecuta el punto 6 (plan de migración) de
@@ -581,7 +646,7 @@ Siguiendo `handoff_entorno_pruebas_local.md` (traspaso de otra sesión, ver punt
 
 ## Problemas conocidos / pendientes
 
-1. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real. Confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba): la primera corrida real vía UI falló así, la segunda con el mismo PDF funcionó. Reconfirmado el 2026-07-19 contra esta producción con el camino PDF firmado/modo enriquecido real. **Reconfirmado una cuarta vez el 2026-07-21**, ahora vía texto libre forzado deliberadamente (ver "Pendiente cerrado: `GET /runs/:id`..." arriba) — mismo patrón exacto (`resumen_estrategia` ausente, `recomendaciones` como string), cada vez en un camino de entrada distinto (UI, PDF firmado, texto libre). **Reconfirmado una quinta vez el 2026-07-24**, verificando el especialista `pmf` recién implementado — 3 corridas consecutivas con la misma tarea fallaron con el patrón idéntico, la cuarta (misma intención, redacción distinta) resolvió `approved` a la primera. Cinco confirmaciones reales — 3 fallos seguidos con la misma tarea es un dato más llamativo que la tasa sintética ~6% ya medida, vale la pena priorizarlo con más urgencia.
+1. Segundo sub-tipo de fallo del especialista (JSON genuinamente corrupto) sigue sin cobertura — monitorear los logs de `structured output reparado sin reintento` (o su ausencia en un `failed`) para medir la tasa real. Confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba): la primera corrida real vía UI falló así, la segunda con el mismo PDF funcionó. Reconfirmado el 2026-07-19 contra esta producción con el camino PDF firmado/modo enriquecido real. **Reconfirmado una cuarta vez el 2026-07-21**, ahora vía texto libre forzado deliberadamente (ver "Pendiente cerrado: `GET /runs/:id`..." arriba) — mismo patrón exacto (`resumen_estrategia` ausente, `recomendaciones` como string), cada vez en un camino de entrada distinto (UI, PDF firmado, texto libre). **Reconfirmado el 2026-07-24 verificando `pmf`, y clasificado con una comprobación acotada aparte** (ver "Clasificación acotada del hallazgo de fallos consecutivos en pmf" arriba): 5 de 6 corridas reales apuntando a `pmf` fallaron con el error byte-por-byte idéntico al ya documentado — mismo sub-tipo, no una categoría nueva, la capa de reparación no puede ayudar (confirmado que ya lo intentó y falló las 5 veces) — pero la frecuencia (~83% en esta muestra) es muy superior al ~6% sintético y a la regresión `mvp`/`ideacion` de la misma sesión (0 fallos), con una hipótesis señalada pero no confirmada de que el contenido recuperado para `pmf` (chunks más largos que la mediana del corpus) correlaciona con el fallo. Seis confirmaciones reales en total — vale la pena priorizarlo con más urgencia, sobre todo investigar la hipótesis de correlación con `pmf` antes de construir `escalado`/`operaciones`/`plataformas` sobre el mismo patrón.
 2. `informeParseDecisionSchema` tiene la misma forma de riesgo (array de objetos) que `specialistDecisionSchema` pero no se lo vio fallar hoy — ya tiene la capa de reparación aplicada preventivamente, sin confirmar si hacía falta.
 3. `handoff_startup_next_v2.md` y `handoff_entorno_pruebas_local.md` siguen sin trackear en este y otros repos — ambos son documentos de traspaso generados a propósito al cierre de sesiones anteriores, pensados para copiarse a las carpetas de trabajo al inicio de una sesión nueva. No se commitean (no son código); `handoff_startup_next_v2.md` contiene pendientes adicionales no reflejados aquí (Hermes en suspenso, entrevista de `startup-advisor` terminando abruptamente, excepción de Avast pendiente).
 4. ~~`GET /runs/:id` no expone el campo `error`...~~ **Resuelto el 2026-07-21** (ver "Pendiente cerrado..." arriba).
