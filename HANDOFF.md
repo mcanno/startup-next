@@ -1,6 +1,62 @@
 # HANDOFF — startup-next (backend)
 
-Última actualización: 2026-07-24.
+Última actualización: 2026-08-03.
+
+## Regresión de `mvp`/`ideacion` contra producción tras el fix del sub-tipo "desanidado": cierre del pendiente de 2941ec0 (2026-08-03)
+
+Cierra el pendiente dejado abierto en el fix del sub-tipo "desanidado"
+(commit `2941ec0`, ver "Fix del sub-tipo 'desanidado'..." más abajo): ese
+día, la regresión obligatoria de `mvp`/`ideacion` (Punto 6 del diseño de
+expansión) quedó bloqueada por saldo agotado de la API de Anthropic. El
+saldo ya se recargó — regresión ejecutada contra esta versión exacta del
+código en producción (`startup-next.fly.dev`).
+
+### `ideacion` — Cafelibro real, misma tarea del 2026-07-19
+
+Reinvocado con el `startup_id` real de Cafelibro (`4df8de99-...`) y la
+misma tarea real ya usada en la verificación de
+`diseno_especialista_ideacion.md` ("Elegir un único segmento y validarlo
+con entrevistas..."). Resultado: `especialista_usado: "ideacion"`,
+`status: "approved"`, 5 recomendaciones citando fuentes reales de
+Customer Development ("Descubrimiento de clientes, fase 1: Determinar
+las hipótesis del modelo de negocio", "Camino al desastre... Suponer
+que «sé lo que quiere el cliente»") — sin contaminación de chunks
+`pmf`.
+
+**Nota aparte, no una regresión**: `hallazgos_ontologia: []` en este run,
+en vez del hallazgo de modo enriquecido visto el 2026-07-21 con el mismo
+`startup_id` — esperado, consecuencia directa del retiro completo del
+ABox en `ontology-engine` (ver "ontology-engine pasa a TBox puro",
+2026-07-23), no relacionado con el fix del desanidado.
+
+### `mvp` — texto libre nuevo
+
+Tarea nueva, redactada de cero ("ya validamos el problema con entrevistas
+de clientes reales... construir un prototipo mínimo viable..."), modo
+base (`startup_id` aleatorio generado por `/informes/parse`). Resultado:
+`especialista_usado: "mvp"`, `status: "approved"`, 5 recomendaciones
+citando fuentes reales de Customer Development (construcción del PMV con
+el conjunto mínimo de características, priorizar evangelistas),
+`hallazgos_ontologia` con `PREREQUISITO_GENERICO` (Experimento/Hipótesis)
+— esperado en modo base, mismo criterio ya visto en corridas anteriores.
+
+### Limpieza
+
+2 runs de prueba (`1934970f-...` de `ideacion`, `b1396f9f-...` de `mvp`,
+ambos `requested_by: "hermes"`) borrados al cierre, confirmado por
+conteo (`next_action_runs`: 36 → 34). Las 2 filas reales de Cafelibro
+(`567fcf09-.../a1975e40-...`) verificadas intactas antes y después de
+borrar.
+
+### Cierre
+
+**Sin regresión detectada.** El fix del sub-tipo "desanidado" (`2941ec0`)
+queda formalmente cerrado con las tres patas de evidencia completas:
+offline (8 tests en `tests/lib/structuredOutputRetry.test.ts`), producción
+real para el caso que motivó el fix (12/12 `pmf` aprobadas, 2026-07-24,
+8 vía el camino nuevo confirmado por logs), y ahora esta regresión de los
+2 especialistas ya existentes contra la misma versión de código. Ver
+"Problemas conocidos / pendientes" #1 más abajo, actualizado.
 
 ## Especialista "pmf" implementado y desplegado — primer paso de la expansión 2→6 (2026-07-24)
 
@@ -831,7 +887,7 @@ Siguiendo `handoff_entorno_pruebas_local.md` (traspaso de otra sesión, ver punt
 
 ## Problemas conocidos / pendientes
 
-1. **Sub-tipo "desanidado" (objeto completo anidado un nivel de más): arreglado y verificado el 2026-07-24** — ver "Fix del sub-tipo 'desanidado'..." arriba. Historial hasta ahí: confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba), reconfirmado el 2026-07-19 (PDF firmado/modo enriquecido), reconfirmado el 2026-07-21 (texto libre forzado), reconfirmado y diagnosticado el 2026-07-24 verificando `pmf` (24 corridas, 8 fallidas, ~33% — ver "Hipótesis de maxTokens..." y "Clasificación acotada..." arriba). `attemptRepair()` ahora detecta este patrón específico (el `JSON.parse()` de un campo roto produce un objeto que ya satisface el schema completo de nivel superior) y lo desanida en vez de descartarlo — verificado offline con 5 capturas reales (`tests/lib/structuredOutputRetry.test.ts`) y en producción (12/12 aprobadas, 8 de ellas vía el nuevo camino, confirmado por logs). **Sigue sin cobertura, a propósito, la otra cara del sub-tipo 2**: JSON genuinamente corrupto que ni siquiera `JSON.parse()` puede parsear (comillas mal cerradas a mitad, contenido truncado de verdad) — ese caso no se toca, mismo criterio de "no reconstruir a ciegas" ya aplicado desde el principio. **Pendiente real, no cerrado en esta sesión**: la regresión de `mvp`/`ideacion` (Cafelibro) contra esta versión exacta del código quedó bloqueada por saldo agotado de la API de Anthropic (`400 credit balance too low`) — repetirla en cuanto se recargue el saldo, antes de dar el fix por completamente cerrado.
+1. **Sub-tipo "desanidado" (objeto completo anidado un nivel de más): arreglado y verificado el 2026-07-24** — ver "Fix del sub-tipo 'desanidado'..." arriba. Historial hasta ahí: confirmado en producción real el 2026-07-14 (ver sección "Entorno local verificado" arriba), reconfirmado el 2026-07-19 (PDF firmado/modo enriquecido), reconfirmado el 2026-07-21 (texto libre forzado), reconfirmado y diagnosticado el 2026-07-24 verificando `pmf` (24 corridas, 8 fallidas, ~33% — ver "Hipótesis de maxTokens..." y "Clasificación acotada..." arriba). `attemptRepair()` ahora detecta este patrón específico (el `JSON.parse()` de un campo roto produce un objeto que ya satisface el schema completo de nivel superior) y lo desanida en vez de descartarlo — verificado offline con 5 capturas reales (`tests/lib/structuredOutputRetry.test.ts`) y en producción (12/12 aprobadas, 8 de ellas vía el nuevo camino, confirmado por logs). **Sigue sin cobertura, a propósito, la otra cara del sub-tipo 2**: JSON genuinamente corrupto que ni siquiera `JSON.parse()` puede parsear (comillas mal cerradas a mitad, contenido truncado de verdad) — ese caso no se toca, mismo criterio de "no reconstruir a ciegas" ya aplicado desde el principio. **Regresión de `mvp`/`ideacion` (Cafelibro) verificada sin hallazgos el 2026-08-03** (ver "Regresión de `mvp`/`ideacion`..." arriba) — quedaba bloqueada por saldo agotado de la API de Anthropic, recargado y confirmado sin regresión contra esta misma versión de código. Fix formalmente cerrado.
 2. `informeParseDecisionSchema` tiene la misma forma de riesgo (array de objetos) que `specialistDecisionSchema` pero no se lo vio fallar hoy — ya tiene la capa de reparación aplicada preventivamente, sin confirmar si hacía falta.
 3. `handoff_startup_next_v2.md` y `handoff_entorno_pruebas_local.md` siguen sin trackear en este y otros repos — ambos son documentos de traspaso generados a propósito al cierre de sesiones anteriores, pensados para copiarse a las carpetas de trabajo al inicio de una sesión nueva. No se commitean (no son código); `handoff_startup_next_v2.md` contiene pendientes adicionales no reflejados aquí (Hermes en suspenso, entrevista de `startup-advisor` terminando abruptamente, excepción de Avast pendiente).
 4. ~~`GET /runs/:id` no expone el campo `error`...~~ **Resuelto el 2026-07-21** (ver "Pendiente cerrado..." arriba).
