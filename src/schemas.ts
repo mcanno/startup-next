@@ -251,6 +251,20 @@ export type InformeParseDecision = z.infer<typeof informeParseDecisionSchema>;
 // (no hechos reales — no los hay en este modo). Nunca bloquea ni fuerza,
 // solo informa — por eso no hay campo "gravedad" ni nada que se parezca a
 // una validación dura.
+// Selección de ancla para el mecanismo OKF-grafo (diseno_mecanismo_okf_grafo.md,
+// Punto 4, Paso 2): llamada chica sobre un conjunto cerrado y pequeño de
+// conceptos (el subgrafo ya inducido para el especialista), mismo patrón
+// que modoBaseConflictoSchema debajo -- no hace falta embeddings para
+// elegir entre un puñado de opciones.
+export const okfSeleccionAnclaSchema = z.object({
+  conceptos_ancla: z
+    .array(z.string())
+    .min(1)
+    .max(2)
+    .describe("ids de los 1-2 conceptos OKF que mejor anclan la tarea, de los provistos. Nunca inventados."),
+});
+export type OkfSeleccionAncla = z.infer<typeof okfSeleccionAnclaSchema>;
+
 export const modoBaseConflictoSchema = z.object({
   conflicto_detectado: z.boolean(),
   conflicto_descripcion: z
