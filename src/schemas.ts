@@ -212,9 +212,11 @@ export const specialistDecisionSchema = z.object({
       z.object({
         titulo: z.string(),
         detalle: z.string(),
-        chunk_ids_citados: z
+        fuentes_citadas: z
           .array(z.string())
-          .describe("chunk_id de los fragmentos recuperados que respaldan esta recomendación. Deben ser de los provistos, nunca inventados."),
+          .describe(
+            "ids de las fuentes recuperadas que respaldan esta recomendación (chunk_id de RAG o id de concepto OKF, según el especialista). Deben ser de las provistas, nunca inventadas.",
+          ),
       }),
     )
     .min(1)

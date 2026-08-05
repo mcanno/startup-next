@@ -191,6 +191,7 @@ export async function startRun(runId: string): Promise<AdvanceRunResult> {
     hallazgosOntologia: [],
     accionNext: undefined,
     retrievedChunks: [],
+    retrievedConcepts: [],
     borrador: undefined,
     cycle: run.cycle,
     especialistaUsado: undefined,

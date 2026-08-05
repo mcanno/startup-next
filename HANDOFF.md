@@ -1,6 +1,227 @@
 # HANDOFF — startup-next (backend)
 
-Última actualización: 2026-08-03.
+Última actualización: 2026-08-05.
+
+## Mecanismo OKF-grafo implementado + especialista "escalado" como piloto (2026-08-05)
+
+Implementa `diseno_mecanismo_okf_grafo.md` completo (confirmado con las 4
+preguntas abiertas resueltas: extensión `.okf.md`, dependencia `yaml`
+aprobada, los 9 ficheros de 7 Powers copiados íntegros incluidos los 3 sin
+especialista implementado hoy, selección de ancla por LLM) más una
+decisión adicional confirmada en el momento: renombrar
+`chunk_ids_citados` → `fuentes_citadas` en `specialistDecisionSchema`
+aprovechando que el Punto 6.2 ya tocaba el retorno de los 3 especialistas
+RAG existentes.
+
+### El mecanismo: recuperación por grafo, no por similitud vectorial
+
+`src/okf/` (nuevo):
+- `types.ts` — `okfConceptFrontmatterSchema` (Zod), `OkfConcept`,
+  `RetrievedOkfConcept`.
+- `loader.ts` — escanea `okf/**/*.okf.md`, parsea el frontmatter (split
+  manual en el primer `\n---\n` — el formato real no siempre trae `---`
+  de apertura, ver más abajo), valida integridad del grafo (toda
+  referencia de `relations` debe resolver a un id cargado, si no lanza
+  con mensaje claro) y cachea en memoria de proceso (lazy singleton,
+  mismo patrón que `ontology-engine/graph.py` — `load_tbox` carga una vez
+  y cachea, no reparsea por request).
+- `graph.ts` — `inducedSubgraph()` filtra el grafo completo a los nodos
+  tageados para un especialista (evita que la recuperación de `escalado`
+  cruce a conceptos de `mvp`/`operaciones`/`plataformas` aunque exista la
+  arista en la fuente completa — verificado con test real, ver abajo);
+  `bfsFromAnchors()` hace BFS acotado por profundidad (default 2) y
+  tamaño (default 6) dentro de ese subgrafo ya filtrado, mismo algoritmo
+  que `precedents_of()` del TBox pero tratando `prerequisites` y
+  `related_concepts` como no dirigidas.
+- `retrieval.ts` — `selectAnchors()` (llamada LLM chica, mismo patrón que
+  `evaluarConflictoModoBase`, sobre el conjunto cerrado del subgrafo),
+  `retrieveOkfConcepts()` (orquesta loader+graph+selección de ancla),
+  `extractPromptSections()` (inyecta secciones 1/2/4 del cuerpo, omite la
+  3 — diagramas ASCII de bajo valor accionable, confirmado por inspección
+  real de los 9 ficheros), `buildSourceCitation()`/`translateOkfFuentes()`
+  (linaje legible desde `sources[0]`, marcador `[Conocimiento emergente,
+  no validado]` antepuesto si `status !== "Verified"`, mismo mecanismo que
+  `FRASE_ENCUADRE` en `orchestratorModoBase.ts`).
+
+### Hallazgos reales sobre el formato de fuente que cambiaron el plan
+
+Los 9 ficheros reales (`TRABAJO/FUENTES/7 poderes/`, ya reorganizados por
+el usuario en subcarpeta con extensión `.md` para cuando se leyeron) no
+tienen frontmatter estándar consistente: **2 de 9 traían `---` de
+apertura, los otros 7 no** — el parser soporta ambas variantes (detecta si
+la primera línea es `---`, si no, arranca la cabecera en la línea 0).
+`relations.prerequisites` en estos ficheros es un DAG conceptual/
+compositivo ("para entender X hace falta entender Y"), no el mismo
+significado que `is_sequential` del TBox de `ontology-engine` (orden
+metodológico real) — no se conflan los dos mecanismos.
+
+### Import: 9 ficheros a `okf/7-powers/*.okf.md`, normalizados
+
+Renombrados al `id` del concepto (sin espacios/tildes), `---` de apertura
+añadido donde faltaba, campo `especialistas: [...]` agregado (nuevo, no
+está en la fuente): los 4 propios de `escalado`
+(`contraposicionamiento`/`costos_de_cambio`/`creacion_de_marcas`/
+`recurso_acorralado`) + las 2 raíces (`definicion_de_poder`/
+`progresion_del_poder`) → `especialistas: [escalado]`; los 3 sin
+especialista implementado hoy (`economias_de_escala` → futuro `mvp`,
+`economias_de_red` → futuro `plataformas`, `poder_del_proceso` → futuro
+`operaciones`) → `especialistas: []`, presentes pero inertes, para que el
+linter de integridad valide el grafo completo sin referencias rotas y
+sin tener que tocar `mvp.ts` (fuera de alcance explícito).
+
+### `src/specialist/escalado.ts` (nuevo)
+
+Mismo patrón exacto que `mvp.ts`/`ideacion.ts`/`pmf.ts`, reusa
+`specialistDecisionSchema` sin cambios. Única diferencia estructural:
+`retrieveOkfConcepts()` en vez de `embedQuery()`+`searchRagChunks()`, y
+devuelve `retrievedChunks: []` explícito (en vez de `retrievedConcepts:
+[]` que devuelven los otros 3).
+
+### Convivencia RAG/OKF: cambios mínimos, confirmados contra código real
+
+- `src/graph/state.ts` — campo nuevo `retrievedConcepts` en paralelo a
+  `retrievedChunks` (default `[]`), nunca ambos poblados a la vez.
+- `src/graph/nodes/specialist.ts` — `dispatchSpecialist` devuelve ambos
+  campos siempre; rama `case "escalado"` agregada.
+- `src/graph/nodes/validator.ts` — `checkCalidadYFuentes`/
+  `translateFuentes` operan sobre la unión de ids válidos de
+  `retrievedChunks` + `retrievedConcepts`; `translateFuentes` prueba
+  primero como chunk, si no resuelve delega a `translateOkfFuentes`.
+- `src/graph/especialistasImplementados.ts` — `"escalado"` agregado al
+  `Set`.
+- `src/runsService.ts` — `initialState` inicializa `retrievedConcepts: []`.
+- **Sin cambios**: `orchestrator.ts` (el `SYSTEM_PROMPT` con la frontera de
+  `escalado` ya estaba escrito desde la sesión de `pmf`, 2026-07-24),
+  `orchestratorModoBase.ts` (el TBox de prerrequisitos —
+  `ESPECIALISTA_A_CONCEPTO["escalado"] = "EngineOfGrowth"`— es un concern
+  separado del mecanismo de recuperación, sigue funcionando igual),
+  `ideacion.ts`/`mvp.ts`/`pmf.ts` sin tocar su lógica (solo el campo
+  `retrievedConcepts: []` agregado a su retorno y el rename del punto
+  siguiente).
+
+### Rename `chunk_ids_citados` → `fuentes_citadas`
+
+`specialistDecisionSchema.recomendaciones[].fuentes_citadas` (antes
+`chunk_ids_citados`) — nombre neutral, vale tanto para `chunk_id` (RAG)
+como para `concept_id` (OKF). Actualizados los 3 prompts de
+`mvp.ts`/`ideacion.ts`/`pmf.ts` y su código de mapeo.
+`tests/lib/structuredOutputRetry.test.ts`: los 5 fixtures reales
+congelados de producción (`capturedNestedPayloads.ts`, captura del
+2026-07-24) **no se tocan** — representan bytes reales de una respuesta
+histórica de Claude con el nombre viejo, reescribirlos falsificaría la
+evidencia. Se testean contra un `legacySpecialistDecisionSchema` local
+(réplica exacta de la forma vigente al momento de la captura), no contra
+el schema actual — decouple deliberado entre "el mecanismo genérico de
+`attemptRepair` sigue funcionando" y "el contrato vigente", documentado
+en el propio archivo de test.
+
+### Dependencia nueva: `yaml`
+
+Única dependencia agregada (aprobada explícitamente). Necesaria porque el
+frontmatter real no calza con lo que espera una librería de frontmatter
+estándar tipo `gray-matter` (no siempre trae `---` de apertura) — el
+split se hace a mano, solo se usa `yaml` para parsear el bloque ya
+aislado.
+
+### Verificación offline: 22 tests nuevos, TDD contra los ficheros reales
+
+`tests/okf/` (nuevo, 22 tests, ningún grafo sintético paralelo — fixtures
+son los propios 9 ficheros reales de `okf/7-powers/`, mismo criterio que
+`diseno_mecanismo_okf_grafo.md` Punto 7 pedía):
+- `loader.test.ts` — parseo de ambas variantes reales de frontmatter (con
+  y sin `---` de apertura), carga de los 9 conceptos reales, verificación
+  de que los tags `especialistas` quedaron como se diseñó, detección de
+  referencia rota (fixture sintética en un directorio temporal, única
+  parte no basada en los ficheros reales porque es un caso negativo),
+  singleton lazy.
+- `graph.test.ts` — el subgrafo inducido de `escalado` es exactamente los
+  6 nodos esperados; `mvp`/`operaciones`/`plataformas` inducen 0 nodos
+  hoy; BFS desde cualquier ancla alcanza los 6 nodos a profundidad 2;
+  **la fuga entre especialistas no ocurre pese a existir la arista en la
+  fuente completa** (`contraposicionamiento.related_concepts` incluye
+  `okf_economias_de_escala`, de `mvp` — confirmado que `bfsFromAnchors`
+  nunca la cruza); límites de profundidad/tamaño respetados.
+- `retrieval.test.ts` — extracción de secciones (1/2/4 sí, 3 no, sobre el
+  cuerpo real de `okf_contraposicionamiento`), formato de cita
+  Verified/Emerging, traducción de fuentes.
+
+`npx tsc --noEmit` y `npm run build` limpios. `npx vitest run`: **40/40**
+(18 preexistentes + 22 nuevos).
+
+**Nota de infraestructura, no del mecanismo en sí**: el `Dockerfile` solo
+copiaba `dist/` a la imagen final — sin `COPY okf ./okf`, el contenedor
+no tendría los ficheros que `getOkfGraph()` necesita leer en
+`process.cwd()/okf`. Agregado antes de desplegar (encontrado por
+inspección, no en producción).
+
+### Deploy: bug de lockfile ya documentado, reincidente
+
+`flyctl deploy` falló primero con el mismo bug ya documentado en "Primer
+despliegue real a producción" (2026-07-18): `npm install yaml` con el
+npm 11 local regeneró `package-lock.json` de forma inconsistente para
+`npm ci` bajo npm 10.9.8 (la versión de `node:22-slim`) — faltaban
+`esbuild@0.28.1` y sus binarios de plataforma. Mismo fix de siempre:
+`npx npm@10.9.8 install --package-lock-only`. Redeploy limpio, `GET
+/health` → `200`, máquina `started`, 1/1 checks passing.
+
+### Verificación real contra producción: 3/3 `escalado` aprobadas, sin regresión en los 3 existentes
+
+3 tareas reales/realistas de `escalado` (defender posición ante
+competidor que copia el modelo, en 3 redacciones distintas) contra
+`startup-next.fly.dev`: **3 de 3 `approved`**, `especialista_usado:
+"escalado"` en las 3, 5-6 recomendaciones cada una, **todas las fuentes
+citadas resuelven a linaje real de 7 Powers** ("7 Poderes: Los
+Fundamentos de la Estrategia Empresarial — Hamilton W. Helmer — <título
+del concepto>") — **ninguna cita cruzó a `economias_de_escala`,
+`economias_de_red` ni `poder_del_proceso`** (los 3 conceptos sin
+especialista, `especialistas: []`), confirmando en producción real lo que
+ya probaba el test de fuga de `graph.test.ts`. Ningún concepto vino
+marcado `[Conocimiento emergente, no validado]` — esperado, los 9
+ficheros de 7 Powers son `status: Verified`.
+
+**Regresión de `ideacion`/`mvp`/`pmf`** (obligatoria, el `SYSTEM_PROMPT`
+del orquestador y `validator.ts` son compartidos): las 3 reinvocadas
+(`ideacion` con Cafelibro real, `mvp`/`pmf` con texto libre nuevo) →
+las 3 `approved`, `especialista_usado` correcto en cada una, fuentes RAG
+reales sin cambios de comportamiento. Sin regresión.
+
+**Limpieza**: 6 runs de prueba (3 `escalado`, 1 `ideacion`, 1 `mvp`, 1
+`pmf`) borrados al cierre, confirmado por conteo (`next_action_runs`: 40
+→ 34). Las 2 filas reales de Cafelibro verificadas intactas antes y
+después.
+
+### Comparación del piloto contra `pmf` (RAG vectorial) — datos recolectados, decisión diferida
+
+- **Tasa de fallo**: 0/3 fallidas en `escalado` (muestra chica). Baseline
+  de `pmf` post-fix: 12/12 aprobadas (2026-07-24). Ambas consistentes con
+  "sin regresión del bug de desanidado", que es del mecanismo de
+  structured output, no de la fuente de contexto — no hay señal de que
+  OKF-grafo sea más o menos propenso a ese bug con esta muestra.
+- **Tasa de citación**: 3/3 corridas de `escalado` citaron fuentes en el
+  100% de sus recomendaciones (16 de 17 recomendaciones con al menos una
+  cita; 1 sin fuentes en la regresión de `ideacion`, comportamiento ya
+  visto antes y aceptado — "dilo en el detalle en vez de forzar una cita
+  que no corresponde"). Comparable a la tasa ya vista en `pmf`/`ideacion`.
+- **Lectura cualitativa**: las citas OKF (linaje libro/autor/concepto) son
+  legibles y específicas, mismo nivel de utilidad percibida que las citas
+  RAG (libro/capítulo/sección) — ninguna genérica o vacía en las 3
+  corridas.
+- **Costo de ingeniería**: `src/okf/` (4 archivos nuevos, ~250 líneas) +
+  9 ficheros de contenido copiados una vez, sin ingesta a Postgres, sin
+  embeddings, sin `rag-ingest`/MinerU/Voyage de por medio — más liviano
+  que el ciclo completo de ingesta RAG (parse+load+re-etiquetado+verify)
+  que requirió `pmf`.
+- **No se decide acá** si migrar `ideacion`/`mvp`/`pmf` a OKF — queda
+  para una sesión aparte con esta evidencia ya recolectada, tal como
+  preveía el diseño.
+
+### Próximo paso
+
+`operaciones` u otro especialista, según priorización del usuario — el
+molde OKF-grafo ya está listo para que sumarlo sea aportar el tag
+`especialistas: [operaciones]` a `okf_poder_del_proceso.okf.md` (y a las
+2 raíces si aplica) + `src/specialist/operaciones.ts`, sin tocar
+`src/okf/`.
 
 ## Regresión de `mvp`/`ideacion` contra producción tras el fix del sub-tipo "desanidado": cierre del pendiente de 2941ec0 (2026-08-03)
 

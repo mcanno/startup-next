@@ -16,4 +16,5 @@ export const ESPECIALISTAS_IMPLEMENTADOS: ReadonlySet<EspecialistaRole> = new Se
   "ideacion",
   "mvp",
   "pmf",
+  "escalado",
 ]);

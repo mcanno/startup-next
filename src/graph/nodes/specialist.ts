@@ -1,8 +1,10 @@
+import { runEscaladoSpecialist } from "../../specialist/escalado.js";
 import { runIdeacionSpecialist } from "../../specialist/ideacion.js";
 import { runMvpSpecialist } from "../../specialist/mvp.js";
 import { runPmfSpecialist } from "../../specialist/pmf.js";
 import type { AccionNext, Borrador, ValidacionCiclo } from "../../schemas.js";
 import type { RetrievedChunk } from "../../db/ragQueries.js";
+import type { RetrievedOkfConcept } from "../../okf/types.js";
 import type { StartupNextStateType } from "../state.js";
 
 // Solo los roles en ESPECIALISTAS_IMPLEMENTADOS (../especialistasImplementados.ts)
@@ -11,15 +13,22 @@ import type { StartupNextStateType } from "../state.js";
 // default lanza en vez de asumir mvp: si algún día ese invariante se rompe,
 // mejor un error explícito que enrutar en silencio al especialista
 // equivocado.
+//
+// retrievedChunks/retrievedConcepts: un especialista RAG (ideacion/mvp/pmf)
+// devuelve retrievedConcepts: [] explícito; uno OKF (escalado) devuelve
+// retrievedChunks: [] explícito -- ver diseno_mecanismo_okf_grafo.md,
+// Punto 6.2.
 function dispatchSpecialist(
   accionNext: AccionNext,
   feedbackValidacion: ValidacionCiclo | undefined,
-): Promise<{ borrador: Borrador; retrievedChunks: RetrievedChunk[] }> {
+): Promise<{ borrador: Borrador; retrievedChunks: RetrievedChunk[]; retrievedConcepts: RetrievedOkfConcept[] }> {
   switch (accionNext.especialista_requerido) {
     case "ideacion":
       return runIdeacionSpecialist(accionNext, feedbackValidacion);
     case "pmf":
       return runPmfSpecialist(accionNext, feedbackValidacion);
+    case "escalado":
+      return runEscaladoSpecialist(accionNext, feedbackValidacion);
     case "mvp":
       return runMvpSpecialist(accionNext, feedbackValidacion);
     default:
@@ -39,7 +48,10 @@ export async function specialistNode(
   // el mismo borrador rechazado.
   const feedbackValidacion = state.cycle > 0 ? state.ciclos[state.cycle - 1]?.validacion : undefined;
 
-  const { borrador, retrievedChunks } = await dispatchSpecialist(state.accionNext, feedbackValidacion);
+  const { borrador, retrievedChunks, retrievedConcepts } = await dispatchSpecialist(
+    state.accionNext,
+    feedbackValidacion,
+  );
 
-  return { borrador, retrievedChunks };
+  return { borrador, retrievedChunks, retrievedConcepts };
 }

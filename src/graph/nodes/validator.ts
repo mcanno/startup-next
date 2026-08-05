@@ -1,6 +1,8 @@
 import { getChatModel, getValidatorModelConfig } from "../../config/models.js";
 import type { RetrievedChunk } from "../../db/ragQueries.js";
 import { invokeStructured } from "../../lib/structuredOutputRetry.js";
+import { translateOkfFuentes } from "../../okf/retrieval.js";
+import type { RetrievedOkfConcept } from "../../okf/types.js";
 import {
   validatorDecisionSchema,
   type Borrador,
@@ -20,37 +22,62 @@ No evalúes calidad de redacción — eso queda diferido hasta que aparezca evid
 // calidad_y_fuentes real: pertenencia de conjunto, hecho determinístico —
 // no vale la pena otra llamada a Claude para verificar algo que el código
 // ya puede comprobar con exactitud (sección 4).
-function checkCalidadYFuentes(borrador: Borrador, retrievedChunks: RetrievedChunk[]): { cumple: boolean; notas: string } {
-  const validIds = new Set(retrievedChunks.map((c) => c.chunkId));
+//
+// Unión de RAG (chunkId) + OKF (conceptId) -- un especialista RAG deja
+// retrievedConcepts en [] y uno OKF deja retrievedChunks en [], nunca
+// ambos poblados a la vez (diseno_mecanismo_okf_grafo.md, Punto 6.3), así
+// que la unión nunca mezcla ids de dos mecanismos distintos en la
+// práctica, solo evita tener que ramificar por especialista acá.
+function checkCalidadYFuentes(
+  borrador: Borrador,
+  retrievedChunks: RetrievedChunk[],
+  retrievedConcepts: RetrievedOkfConcept[],
+): { cumple: boolean; notas: string } {
+  const validIds = new Set([...retrievedChunks.map((c) => c.chunkId), ...retrievedConcepts.map((c) => c.conceptId)]);
   const inventadas = borrador.recomendaciones
     .flatMap((r) => r.fuentes)
-    .filter((chunkId) => !validIds.has(chunkId));
+    .filter((id) => !validIds.has(id));
 
   if (inventadas.length > 0) {
     return {
       cumple: false,
-      notas: `El borrador cita ${inventadas.length} fuente(s) que no vienen de los chunks recuperados en esta búsqueda: ${inventadas.join(", ")}.`,
+      notas: `El borrador cita ${inventadas.length} fuente(s) que no vienen de los chunks/conceptos recuperados en esta búsqueda: ${inventadas.join(", ")}.`,
     };
   }
-  return { cumple: true, notas: "todas las fuentes citadas provienen de chunks realmente recuperados." };
+  return { cumple: true, notas: "todas las fuentes citadas provienen de chunks/conceptos realmente recuperados." };
 }
 
-// El chunk_id es detalle interno — informe_final (lo que ve el fundador)
-// lleva citas legibles armadas con la metadata ya guardada en rag_chunks.
-function translateFuentes(chunkIds: string[], retrievedChunks: RetrievedChunk[]): string[] {
+// El chunk_id/concept_id es detalle interno — informe_final (lo que ve el
+// fundador) lleva citas legibles: armadas con la metadata de rag_chunks
+// para RAG, o el linaje OKF (translateOkfFuentes) para escalado. Prueba
+// primero como chunk, si no resuelve prueba como concepto -- nunca ambos
+// a la vez en la práctica (ver nota de checkCalidadYFuentes arriba).
+function translateFuentes(
+  ids: string[],
+  retrievedChunks: RetrievedChunk[],
+  retrievedConcepts: RetrievedOkfConcept[],
+): string[] {
   const byId = new Map(retrievedChunks.map((c) => [c.chunkId, c]));
-  return chunkIds
-    .map((chunkId) => byId.get(chunkId))
+  const chunkCitas = ids
+    .map((id) => byId.get(id))
     .filter((chunk): chunk is RetrievedChunk => Boolean(chunk))
     .map((chunk) => [chunk.libro, chunk.capitulo, chunk.seccion].filter(Boolean).join(" — "));
+
+  const conceptIds = ids.filter((id) => !byId.has(id));
+  return [...chunkCitas, ...translateOkfFuentes(conceptIds, retrievedConcepts)];
 }
 
-function buildInformeFinal(borrador: Borrador, retrievedChunks: RetrievedChunk[], aprobado: boolean): InformeFinal {
+function buildInformeFinal(
+  borrador: Borrador,
+  retrievedChunks: RetrievedChunk[],
+  retrievedConcepts: RetrievedOkfConcept[],
+  aprobado: boolean,
+): InformeFinal {
   return {
     recomendaciones: borrador.recomendaciones.map((r) => ({
       titulo: r.titulo,
       detalle: r.detalle,
-      fuentes: translateFuentes(r.fuentes, retrievedChunks),
+      fuentes: translateFuentes(r.fuentes, retrievedChunks, retrievedConcepts),
     })),
     consideraciones_metodologicas: borrador.consideraciones_metodologicas,
     aprobado,
@@ -98,7 +125,7 @@ export async function validatorNode(state: StartupNextStateType): Promise<Partia
     ]),
   );
 
-  const calidadYFuentes = checkCalidadYFuentes(state.borrador, state.retrievedChunks);
+  const calidadYFuentes = checkCalidadYFuentes(state.borrador, state.retrievedChunks, state.retrievedConcepts);
   const aprobado = decision.fidelidad_cumple && decision.coherencia_cumple && calidadYFuentes.cumple;
 
   const validacion = {
@@ -129,11 +156,13 @@ export async function validatorNode(state: StartupNextStateType): Promise<Partia
 
   if (validacion.aprobado) {
     patch.status = "approved";
-    patch.resultado = { informe_final: buildInformeFinal(state.borrador, state.retrievedChunks, true) };
+    patch.resultado = {
+      informe_final: buildInformeFinal(state.borrador, state.retrievedChunks, state.retrievedConcepts, true),
+    };
   } else if (cycle >= state.maxCycles) {
     patch.status = "max_cycles_reached";
     patch.resultado = {
-      informe_final: buildInformeFinal(state.borrador, state.retrievedChunks, false),
+      informe_final: buildInformeFinal(state.borrador, state.retrievedChunks, state.retrievedConcepts, false),
       no_respuesta: buildNoRespuestaOntologia([...state.ciclos, ciclo]),
     };
   }

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { invokeStructured } from "../../src/lib/structuredOutputRetry.js";
 import { specialistDecisionSchema } from "../../src/schemas.js";
 import { CAPTURED_NESTED_PAYLOADS } from "./fixtures/capturedNestedPayloads.js";
@@ -6,6 +7,28 @@ import { CAPTURED_NESTED_PAYLOADS } from "./fixtures/capturedNestedPayloads.js";
 function rawWithArgs(args: Record<string, unknown>) {
   return { tool_calls: [{ args }] };
 }
+
+// Réplica exacta de specialistDecisionSchema tal como era al momento de
+// esta captura real (2026-07-24, campo "chunk_ids_citados" -- renombrado a
+// "fuentes_citadas" después, ver diseno_mecanismo_okf_grafo.md Punto 6.4).
+// Deliberadamente NO se actualiza junto con el schema vigente: el valor de
+// este test es reproducir el mecanismo genérico de reparación de
+// attemptRepair() contra bytes reales congelados de producción, no seguir
+// el contrato actual -- reescribir los fixtures para que calcen con el
+// nombre nuevo falsificaría la evidencia real que representan.
+const legacySpecialistDecisionSchema = z.object({
+  resumen_estrategia: z.string(),
+  recomendaciones: z
+    .array(
+      z.object({
+        titulo: z.string(),
+        detalle: z.string(),
+        chunk_ids_citados: z.array(z.string()),
+      }),
+    )
+    .min(1)
+    .max(6),
+});
 
 describe("invokeStructured — reparación por desanidado (investigación real de pmf, 2026-07-24)", () => {
   it.each(CAPTURED_NESTED_PAYLOADS.map((payload, i) => [i, payload] as const))(
@@ -16,7 +39,7 @@ describe("invokeStructured — reparación por desanidado (investigación real d
         parsed: null,
       });
 
-      const result = await invokeStructured(specialistDecisionSchema, "specialistDecisionSchema", call);
+      const result = await invokeStructured(legacySpecialistDecisionSchema, "specialistDecisionSchema", call);
 
       expect(call).toHaveBeenCalledTimes(1); // reparado en el primer intento, sin reintento
       expect(typeof result.resumen_estrategia).toBe("string");
@@ -47,7 +70,7 @@ describe("invokeStructured — reparación por desanidado (investigación real d
 
   it("caso de reparación previo (campo a campo) sigue funcionando sin cambios: recomendaciones como array serializado, resumen_estrategia presente y válido", async () => {
     const recomendacionesComoString = JSON.stringify([
-      { titulo: "t1", detalle: "d1", chunk_ids_citados: ["a"] },
+      { titulo: "t1", detalle: "d1", fuentes_citadas: ["a"] },
     ]);
     const call = vi.fn().mockResolvedValue({
       raw: rawWithArgs({ resumen_estrategia: "resumen real", recomendaciones: recomendacionesComoString }),
@@ -58,7 +81,7 @@ describe("invokeStructured — reparación por desanidado (investigación real d
 
     expect(call).toHaveBeenCalledTimes(1);
     expect(result.resumen_estrategia).toBe("resumen real");
-    expect(result.recomendaciones).toEqual([{ titulo: "t1", detalle: "d1", chunk_ids_citados: ["a"] }]);
+    expect(result.recomendaciones).toEqual([{ titulo: "t1", detalle: "d1", fuentes_citadas: ["a"] }]);
   });
 
   it("JSON genuinamente corrupto (no parseable) sigue sin repararse a propósito — cae al reintento normal", async () => {

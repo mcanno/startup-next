@@ -22,9 +22,9 @@ const SYSTEM_PROMPT = `Eres el especialista de product-market fit (PMF) de Start
 Tu foco es el encaje producto-mercado con clientes reales ya existentes: validar y mejorar la repetibilidad del modelo de negocio, el posicionamiento de la empresa y del producto, y el desarrollo de clientes en la fase de validación — no la construcción de una primera versión del producto (eso es responsabilidad del especialista de mvp) ni la fase previa de descubrimiento del problema/segmento (eso es responsabilidad del especialista de ideacion).
 
 Reglas:
-- Cada recomendación debe estar respaldada por al menos un fragmento de los provistos — cita su chunk_id en chunk_ids_citados.
+- Cada recomendación debe estar respaldada por al menos un fragmento de los provistos — cita su chunk_id en fuentes_citadas.
 - No inventes fragmentos ni cites chunk_ids que no te hayan sido provistos.
-- Si ningún fragmento recuperado es realmente relevante, dilo en el detalle en vez de forzar una cita que no corresponde — puedes dejar chunk_ids_citados vacío para esa recomendación.
+- Si ningún fragmento recuperado es realmente relevante, dilo en el detalle en vez de forzar una cita que no corresponde — puedes dejar fuentes_citadas vacío para esa recomendación.
 - Si recibes la validación de un ciclo anterior rechazado, corrige específicamente lo que falló — no repitas el mismo borrador.`;
 
 function buildQueryText(accionNext: AccionNext, feedbackValidacion?: ValidacionCiclo): string {
@@ -50,7 +50,7 @@ function buildChunksSection(chunks: RetrievedChunk[]): string {
 export async function runPmfSpecialist(
   accionNext: AccionNext,
   feedbackValidacion?: ValidacionCiclo,
-): Promise<{ borrador: Borrador; retrievedChunks: RetrievedChunk[] }> {
+): Promise<{ borrador: Borrador; retrievedChunks: RetrievedChunk[]; retrievedConcepts: [] }> {
   const queryEmbedding = await embedQuery(buildQueryText(accionNext, feedbackValidacion));
   const chunks = await searchRagChunks(queryEmbedding, ESPECIALISTA);
 
@@ -84,10 +84,10 @@ export async function runPmfSpecialist(
     recomendaciones: decision.recomendaciones.map((r) => ({
       titulo: r.titulo,
       detalle: r.detalle,
-      fuentes: r.chunk_ids_citados,
+      fuentes: r.fuentes_citadas,
     })),
     consideraciones_metodologicas: accionNext.hallazgos_ontologia,
   };
 
-  return { borrador, retrievedChunks: chunks };
+  return { borrador, retrievedChunks: chunks, retrievedConcepts: [] };
 }
