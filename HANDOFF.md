@@ -1,6 +1,196 @@
 # HANDOFF — startup-next (backend)
 
-Última actualización: 2026-08-05.
+Última actualización: 2026-08-06.
+
+## Especialista "plataformas" implementado y desplegado — segunda implementación real del mecanismo OKF-grafo, confirma el coste bajo del diseño genérico (2026-08-06)
+
+Construye el especialista `plataformas` sobre el mecanismo OKF-grafo
+(`src/okf/`, ya implementado y piloteado con `escalado`, ver entrada de
+2026-08-05 abajo) con la fuente *Platform Scale* ("La escalada de la
+plataforma", Sangeet Paul Choudary, 10 conceptos ya construidos como grafo
+íntegro por el usuario en `TRABAJO/FUENTES/`). Objetivo doble explícito de
+la sesión: construir el especialista, y medir con evidencia si sumar un
+segundo especialista OKF es efectivamente barato — la apuesta del diseño
+genérico de 2026-08-05. **No se escribió documento de diseño nuevo** —
+solo una verificación de encaje breve antes de tocar código, tal como se
+pidió.
+
+### Verificación de encaje: sin fricción, sin tocar `src/okf/`
+
+Los 10 ficheros reales (`TRABAJO/FUENTES/La escalada de la plataforma/`)
+resultaron **más limpios que los de 7 Powers**: los 10 ya traían `---` de
+apertura, el `id` ya coincidía con el nombre de archivo, y no había ningún
+fichero agregado fuera de los 10 (confirmado por listado exhaustivo de la
+carpeta) — a diferencia de 7 Powers (2/9 con apertura inconsistente,
+nombres con espacios/tildes). Única normalización real necesaria por
+fichero: renombrar `.md` → `.okf.md` e insertar el bloque
+`especialistas:\n  - plataformas` entre `tags:` y `relations:` (script
+`awk` de una línea, 10 ficheros, verificado con `diff` que no tocó nada
+más que esas 2 líneas).
+
+**El mecanismo no necesitó ningún cambio** — `loadOkfConcepts()` cargó los
+19 conceptos combinados (9 de 7-powers + 10 de platform-scale) sin
+modificar `loader.ts`/`graph.ts`/`retrieval.ts`/`types.ts`, confirmado con
+el linter de integridad real (no a mano): `npx vitest run tests/okf` pasó
+de 22 a 27 tests verdes tras actualizar las dos aserciones que hardcodeaban
+"9 conceptos"/"plataformas induce 0 nodos" (esperado: eran ciertas solo
+mientras existía una única fuente). Esto confirma la promesa central del
+diseño de 2026-08-05: sumar una fuente nueva es agregar ficheros con el tag
+correcto, no tocar el mecanismo.
+
+### Topología: un hub único y dominante, y el primer caso real donde la poda del BFS se ejercita
+
+A diferencia de `escalado` (6 nodos, 2 raíces combinadas actuando de hub,
+el BFS acotado nunca necesitó cortar porque el subgrafo entero cabía bajo
+`maxConcepts=6`), el subgrafo de `plataformas` tiene **10 nodos** con un
+**único hub dominante**: `okf_interaccion_central` está conectado directo
+(prerequisite o related_concept) a 8 de los otros 9 nodos; el único que
+queda a distancia 2 (`okf_efectos_red_inversos`, vía `okf_pila_plataforma`)
+igual entra dentro de `maxDepth=2`. Resultado verificado con
+`bfsFromAnchors()` real (no simulado): **desde cualquier ancla, profundidad
+2 alcanza los 10 nodos** — pero como 10 > `maxConcepts=6`, **la poda corta
+los 4 nodos más lejanos y devuelve exactamente 6, siempre con el ancla
+incluida**. Es la primera vez que el recorte por tamaño del diseño de
+2026-08-05 se ejercita de verdad con datos reales (el piloto de `escalado`
+lo dejó documentado como "no ejercitado, diseñado igual" — ver esa
+entrada). Cubierto por 3 tests nuevos en `tests/okf/graph.test.ts`.
+
+### Importación: `okf/platform-scale/*.okf.md`
+
+10 ficheros, mismo criterio que `okf/7-powers/`: nombre = `id` del
+concepto, `especialistas: [plataformas]` en los 10 (a diferencia de 7
+Powers, acá no hay conceptos "sin especialista implementado hoy" — las 10
+fuentes completas de Platform Scale pertenecen a `plataformas`, no hay
+reparto entre varios especialistas futuros).
+
+### `src/specialist/plataformas.ts` (nuevo)
+
+Mismo patrón exacto que `escalado.ts` (86 líneas, prácticamente calco
+estructural: mismo uso de `retrieveOkfConcepts()`, mismo
+`specialistDecisionSchema` sin cambios, `retrievedChunks: []` explícito).
+`SYSTEM_PROMPT` propio: dinámicas de negocio de plataforma (interacción
+central, efectos de red, arranque en frío) — explícitamente no la
+estrategia de un negocio lineal (`escalado`) ni la operación interna
+(`operaciones`).
+
+### Enrutamiento: 2 puntos tocados, no 5
+
+A diferencia de `escalado` (que necesitó tocar `schemas.ts`, `state.ts`,
+`specialist.ts`, `validator.ts` y el `SYSTEM_PROMPT` del orquestador),
+`plataformas` solo tocó:
+
+1. `src/graph/nodes/specialist.ts` — rama nueva `case "plataformas":
+   return runPlataformasSpecialist(...)` (+3 líneas).
+2. `src/graph/especialistasImplementados.ts` — `"plataformas"` agregado al
+   `Set` (+4/-3 líneas, incluye actualizar el comentario).
+
+**Confirmado limpio, sin tocar, con evidencia directa de por qué no hacía
+falta**:
+- `src/schemas.ts` (`especialistaRoleSchema`) — `"plataformas"` ya estaba
+  en el enum desde `diseno_expansion_especialistas.md` (2026-07-24, cuando
+  se cerró el enum de 6 roles).
+- `src/graph/nodes/orchestrator.ts` (`SYSTEM_PROMPT`) — la frontera de
+  `plataformas` ya estaba escrita desde esa misma sesión (confirmado
+  leyendo el archivo real, línea 34: "el negocio en sí es una
+  plataforma..."), nunca se usó hasta ahora.
+- `src/graph/nodes/orchestratorModoBase.ts` (`ESPECIALISTA_A_CONCEPTO`) —
+  sin ancla para `plataformas`, mismo criterio ya aplicado a `pmf`/
+  `operaciones`: sin evidencia real de que haga falta modelar un concepto
+  nuevo en el TBox.
+- `src/graph/state.ts`/`src/graph/nodes/validator.ts` — ya genéricos sobre
+  la unión `retrievedChunks`/`retrievedConcepts` desde el pase de
+  `escalado`, ningún especialista nuevo (RAG u OKF) necesita tocarlos.
+- `Dockerfile` — ya copiaba `okf ./okf` completo desde el pase de
+  `escalado` (el hallazgo de infraestructura de esa sesión), recogió
+  `okf/platform-scale/` sin cambios.
+
+### Verificación offline: 27/27 (22 preexistentes + 5 actualizados/nuevos)
+
+`npx tsc --noEmit` limpio. `npx vitest run`: 45/45 en la suite completa
+(22 tests preexistentes de `tests/okf/`, 2 corregidos para reflejar 19
+conceptos combinados en vez de 9, 3 nuevos sobre la topología de
+`plataformas` descrita arriba).
+
+### Deploy: mismo bug de Avast ya documentado, reincidente
+
+`flyctl deploy` quedó colgado sin ninguna línea de output — mismo patrón
+de Avast interceptando TLS contra el builder remoto de Fly ya documentado
+en sesiones anteriores, pero esta vez sin el mensaje de error explícito
+(`x509: certificate signed by unknown authority`) visible, solo el proceso
+sin avanzar. Confirmado pausando Avast: el intento colgado no se recuperó
+solo (probablemente el handshake TLS quedó a medias desde antes de pausar
+el antivirus), hubo que matarlo y relanzar `flyctl deploy` limpio — ese sí
+completó en su tiempo normal. `GET /health` → `200`.
+
+### Verificación real contra producción: 6/6 aprobadas, sin fuga, sin regresión
+
+**2 casos reales de `plataformas`**, deliberadamente en zonas distintas del
+grafo:
+- Marketplace de dos lados con problema de arranque en frío (huevo y
+  gallina) → `approved`, `especialista_usado: "plataformas"`, citas
+  exactas de `okf_resolucion_huevo_gallina` ("Patrones de Ignición de
+  Red"), `okf_interaccion_central` y `okf_motor_pull_facilitate_match`.
+- Plataforma con spam/degradación de calidad por crecimiento acelerado →
+  `approved`, citas exactas de `okf_efectos_red_inversos`,
+  `okf_matriz_traccion_friccion`, `okf_valor_acumulativo` y
+  `okf_marco_trie` — el modelo recuperó y citó el concepto
+  temáticamente correcto en los dos casos, sin forzar ninguno genérico.
+- **Ninguna cita cruzó a 7 Powers** en ninguno de los dos casos.
+
+**Regresión completa, las 4 corridas restantes**: `escalado` (7 Powers,
+"defender posición ante competidor que copia el modelo") → `approved`,
+citas solo de 7 Powers, sin fuga a Platform Scale (confirma que dos fuentes
+OKF conviviendo en el mismo `okf/` no se cruzan entre sí, no solo que cada
+una no cruza a `mvp`/`operaciones`). `ideacion` (Cafelibro real,
+`4df8de99-...`, misma tarea de siempre) → `approved`. `mvp`/`pmf` (texto
+libre nuevo) → `approved` los dos. Sin cambios de comportamiento en los 3
+especialistas RAG ni en el especialista OKF ya existente.
+
+**Limpieza**: 6 runs de prueba (2 `plataformas`, 1 `escalado`, 1
+`ideacion`, 1 `mvp`, 1 `pmf`) borrados al cierre, confirmado por conteo
+(`next_action_runs`: 40 → 34). Las 2 filas reales preexistentes
+(`567fcf09-...`, Cafelibro real; `a1975e40-...`, otra startup real con
+individuals propios, no ambas de Cafelibro pese a citarse juntas en
+entradas anteriores de este documento) verificadas intactas antes y
+después, con su `startup_id` original sin alterar.
+
+### El dato que responde la pregunta de la sesión: el segundo especialista OKF fue barato, con números concretos
+
+| | `escalado` (piloto, 2026-08-05) | `plataformas` (2026-08-06) |
+|---|---|---|
+| Cambios a `src/okf/` (el mecanismo) | 4 archivos nuevos, ~250 líneas (se estaba construyendo) | **0 líneas** |
+| Puntos de enrutamiento tocados | 5 (`schemas.ts`, `state.ts`, `specialist.ts`, `validator.ts`, `orchestrator.ts`) | **2** (`specialist.ts` +3, `especialistasImplementados.ts` +4/-3) |
+| `Dockerfile` | 1 línea nueva (`COPY okf`) | 0 (ya cubría `okf/` completo) |
+| Dependencia nueva | `yaml` (única, para todo el mecanismo) | 0 |
+| Fichero del especialista | `escalado.ts`, 87 líneas | `plataformas.ts`, 86 líneas (calco estructural) |
+| Normalización de fuente | 9 ficheros, con variantes de frontmatter reales a resolver (parser tuvo que soportar ambas) | 10 ficheros, ya limpios — 1 línea de `awk`, sin decisiones nuevas de parseo |
+| Tests offline | 22 nuevos (mecanismo completo desde cero) | 3 nuevos + 2 corregidos (topología específica de la fuente nueva) |
+| Verificación real | 3/3 + regresión de 3 | 2/2 + regresión de 4 (incluye el otro OKF) |
+
+**Lectura**: la promesa central de `diseno_mecanismo_okf_grafo.md`
+("debe ser barato sumar `operaciones`/`plataformas`/otros aportando solo
+sus ficheros y registrando el especialista — sin rediseñar el mecanismo")
+se confirma con evidencia directa, no solo con la intención de diseño: cero
+líneas tocadas en `src/okf/`, cero puntos de enrutamiento de los que ya
+quedaron genéricos tras el pase de `escalado` (schemas/state/validator/
+orchestrator), y el único costo real fue el que no se puede evitar —
+escribir el `SYSTEM_PROMPT` del especialista nuevo y registrar sus 2 líneas
+de dispatch. La topología distinta (hub único de 10 nodos vs. 2 raíces de 6
+nodos) tampoco forzó ningún ajuste: el mismo `maxDepth`/`maxConcepts` por
+defecto siguió funcionando, simplemente ejercitando por primera vez la
+rama de poda que el diseño original ya prevía sin evidencia real.
+
+### Próximo paso
+
+`operaciones` sigue pendiente, en el mismo estado que al cierre de la
+sesión de `escalado`: su fuente propia de 7 Powers (`okf_poder_del_proceso`,
+todavía `especialistas: []`) está lista para taggear, pero su segunda
+fuente (OKF de "startup nativa de IA") sigue sin construir — el usuario la
+está armando. `plataformas` se adelantó en el orden porque su fuente
+(Platform Scale) ya estaba lista como grafo íntegro; el orden
+`pmf → escalado → operaciones → plataformas` de
+`diseno_expansion_especialistas.md` queda así invertido en sus dos últimos
+pasos por disponibilidad real de fuente, no por replanificación.
 
 ## Mecanismo OKF-grafo implementado + especialista "escalado" como piloto (2026-08-05)
 

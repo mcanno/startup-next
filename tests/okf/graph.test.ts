@@ -21,11 +21,63 @@ describe("inducedSubgraph — contra el grafo real de 7 Powers", () => {
     );
   });
 
-  it("mvp/operaciones/plataformas inducen 0 nodos hoy (nadie tageado todavía)", () => {
+  it("mvp/operaciones inducen 0 nodos hoy (nadie tageado todavía)", () => {
     const concepts = loadOkfConcepts(REAL_OKF_ROOT);
     expect(inducedSubgraph(concepts, "mvp").size).toBe(0);
     expect(inducedSubgraph(concepts, "operaciones").size).toBe(0);
-    expect(inducedSubgraph(concepts, "plataformas").size).toBe(0);
+  });
+
+  it("plataformas induce exactamente los 10 nodos de Platform Scale", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const subgraph = inducedSubgraph(concepts, "plataformas");
+    expect([...subgraph.keys()].sort()).toEqual(
+      [
+        "okf_efectos_red_inversos",
+        "okf_escala_plataforma",
+        "okf_interaccion_central",
+        "okf_lienzo_plataforma",
+        "okf_marco_trie",
+        "okf_matriz_traccion_friccion",
+        "okf_motor_pull_facilitate_match",
+        "okf_pila_plataforma",
+        "okf_resolucion_huevo_gallina",
+        "okf_valor_acumulativo",
+      ].sort(),
+    );
+  });
+});
+
+describe("bfsFromAnchors — subgrafo real de plataformas (10 nodos, topología distinta a escalado)", () => {
+  // okf_interaccion_central es un hub dominante (8 de los otros 9 nodos lo
+  // referencian directo en prerequisites/related_concepts) -- a diferencia
+  // de escalado (6 nodos, cabían enteros bajo maxConcepts=6), acá el
+  // subgrafo completo (10 nodos) excede el default y la poda de
+  // bfsFromAnchors se ejercita de verdad por primera vez.
+  it("desde el hub (interaccion_central), profundidad 2 alcanza los 10 nodos sin acotar tamaño", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const subgraph = inducedSubgraph(concepts, "plataformas");
+
+    const result = bfsFromAnchors(subgraph, ["okf_interaccion_central"], 2, 100);
+    expect(result).toHaveLength(10);
+  });
+
+  it("con maxConcepts por defecto (6), la poda corta los nodos más lejanos y conserva el ancla", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const subgraph = inducedSubgraph(concepts, "plataformas");
+
+    const result = bfsFromAnchors(subgraph, ["okf_interaccion_central"]); // maxDepth/maxConcepts por defecto: 2/6
+    expect(result).toHaveLength(6);
+    expect(result[0]).toBe("okf_interaccion_central");
+  });
+
+  it("nunca cruza a un concepto de 7 Powers (poda por subgrafo inducido, no por BFS)", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const subgraph = inducedSubgraph(concepts, "plataformas");
+
+    const result = bfsFromAnchors(subgraph, ["okf_interaccion_central"], 2, 100);
+    expect(result.some((id) => id.includes("poder") || id.includes("marca") || id.includes("acorralado"))).toBe(
+      false,
+    );
   });
 });
 

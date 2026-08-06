@@ -79,10 +79,10 @@ describe("parseOkfFile", () => {
   });
 });
 
-describe("loadOkfConcepts — contra los 9 ficheros reales de okf/7-powers", () => {
-  it("carga los 9 conceptos reales", () => {
+describe("loadOkfConcepts — contra los 19 ficheros reales de okf/ (7-powers + platform-scale)", () => {
+  it("carga los 19 conceptos reales de las dos fuentes", () => {
     const concepts = loadOkfConcepts(REAL_OKF_ROOT);
-    expect(concepts.size).toBe(9);
+    expect(concepts.size).toBe(19);
     expect([...concepts.keys()].sort()).toEqual(
       [
         "okf_contraposicionamiento",
@@ -94,8 +94,36 @@ describe("loadOkfConcepts — contra los 9 ficheros reales de okf/7-powers", () 
         "okf_poder_del_proceso",
         "okf_progresion_del_poder",
         "okf_recurso_acorralado",
+        "okf_efectos_red_inversos",
+        "okf_escala_plataforma",
+        "okf_interaccion_central",
+        "okf_lienzo_plataforma",
+        "okf_marco_trie",
+        "okf_matriz_traccion_friccion",
+        "okf_motor_pull_facilitate_match",
+        "okf_pila_plataforma",
+        "okf_resolucion_huevo_gallina",
+        "okf_valor_acumulativo",
       ].sort(),
     );
+  });
+
+  it("los 10 conceptos de Platform Scale están tageados especialistas: [plataformas]", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    for (const id of [
+      "okf_efectos_red_inversos",
+      "okf_escala_plataforma",
+      "okf_interaccion_central",
+      "okf_lienzo_plataforma",
+      "okf_marco_trie",
+      "okf_matriz_traccion_friccion",
+      "okf_motor_pull_facilitate_match",
+      "okf_pila_plataforma",
+      "okf_resolucion_huevo_gallina",
+      "okf_valor_acumulativo",
+    ]) {
+      expect(concepts.get(id)?.especialistas).toEqual(["plataformas"]);
+    }
   });
 
   it("los 4 conceptos propios de escalado + las 2 raíces están tageados especialistas: [escalado]", () => {

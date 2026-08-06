@@ -6,9 +6,9 @@
 // orchestrator.ts/specialist.ts ya reconocían "ideacion", ver
 // diseno_especialista_ideacion.md, punto 5.4).
 //
-// Roles del enum sin entrada acá (hoy: operaciones, plataformas) caen a
-// sin_especialista con gracia, igual que ya hacía cualquier rol no
-// implementado antes de esta refactorización.
+// Roles del enum sin entrada acá (hoy: operaciones) caen a sin_especialista
+// con gracia, igual que ya hacía cualquier rol no implementado antes de
+// esta refactorización.
 
 import type { EspecialistaRole } from "../schemas.js";
 
@@ -17,4 +17,5 @@ export const ESPECIALISTAS_IMPLEMENTADOS: ReadonlySet<EspecialistaRole> = new Se
   "mvp",
   "pmf",
   "escalado",
+  "plataformas",
 ]);

@@ -1,6 +1,7 @@
 import { runEscaladoSpecialist } from "../../specialist/escalado.js";
 import { runIdeacionSpecialist } from "../../specialist/ideacion.js";
 import { runMvpSpecialist } from "../../specialist/mvp.js";
+import { runPlataformasSpecialist } from "../../specialist/plataformas.js";
 import { runPmfSpecialist } from "../../specialist/pmf.js";
 import type { AccionNext, Borrador, ValidacionCiclo } from "../../schemas.js";
 import type { RetrievedChunk } from "../../db/ragQueries.js";
@@ -29,6 +30,8 @@ function dispatchSpecialist(
       return runPmfSpecialist(accionNext, feedbackValidacion);
     case "escalado":
       return runEscaladoSpecialist(accionNext, feedbackValidacion);
+    case "plataformas":
+      return runPlataformasSpecialist(accionNext, feedbackValidacion);
     case "mvp":
       return runMvpSpecialist(accionNext, feedbackValidacion);
     default:
