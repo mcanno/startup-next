@@ -21,10 +21,22 @@ describe("inducedSubgraph — contra el grafo real de 7 Powers", () => {
     );
   });
 
-  it("mvp/operaciones inducen 0 nodos hoy (nadie tageado todavía)", () => {
+  it("mvp induce 0 nodos hoy (nadie tageado todavía)", () => {
     const concepts = loadOkfConcepts(REAL_OKF_ROOT);
     expect(inducedSubgraph(concepts, "mvp").size).toBe(0);
-    expect(inducedSubgraph(concepts, "operaciones").size).toBe(0);
+  });
+
+  it("operaciones induce exactamente los 4 nodos de startup nativa de IA", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const subgraph = inducedSubgraph(concepts, "operaciones");
+    expect([...subgraph.keys()].sort()).toEqual(
+      [
+        "okf_canal_producto_ia",
+        "okf_capa_experta_inteligencia",
+        "okf_legibilidad_organizacional",
+        "okf_ontologia_empresarial_optimizable",
+      ].sort(),
+    );
   });
 
   it("plataformas induce exactamente los 10 nodos de Platform Scale", () => {
@@ -78,6 +90,39 @@ describe("bfsFromAnchors — subgrafo real de plataformas (10 nodos, topología 
     expect(result.some((id) => id.includes("poder") || id.includes("marca") || id.includes("acorralado"))).toBe(
       false,
     );
+  });
+});
+
+describe("bfsFromAnchors — subgrafo real de operaciones (4 nodos, densamente conectado)", () => {
+  // A diferencia de plataformas (10 nodos, un hub único) y de escalado (6
+  // nodos, 2 raíces hub), acá los 4 nodos NO están sueltos: 5 de las 6
+  // aristas posibles del grafo completo existen (okf_legibilidad_organizacional
+  // y okf_ontologia_empresarial_optimizable tienen grado 3 cada uno, conectados
+  // a los otros 3). Con solo 4 nodos en total (< maxConcepts=6), la poda
+  // nunca se ejercita acá -- cualquier ancla trae el subgrafo completo.
+  it("desde cualquier ancla, profundidad 2 alcanza los 4 nodos (grafo denso, sin nodos sueltos)", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const subgraph = inducedSubgraph(concepts, "operaciones");
+
+    for (const anchor of [...subgraph.keys()]) {
+      const result = bfsFromAnchors(subgraph, [anchor], 2, 6);
+      expect(result.sort()).toEqual(
+        [
+          "okf_canal_producto_ia",
+          "okf_capa_experta_inteligencia",
+          "okf_legibilidad_organizacional",
+          "okf_ontologia_empresarial_optimizable",
+        ].sort(),
+      );
+    }
+  });
+
+  it("nunca cruza a un concepto de 7 Powers ni de Platform Scale", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const subgraph = inducedSubgraph(concepts, "operaciones");
+
+    const result = bfsFromAnchors(subgraph, ["okf_legibilidad_organizacional"], 2, 100);
+    expect(result).toHaveLength(4);
   });
 });
 

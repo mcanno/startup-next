@@ -2,6 +2,183 @@
 
 Última actualización: 2026-08-06.
 
+## Especialista "operaciones" implementado y desplegado — tercera implementación real del mecanismo OKF-grafo, primera con conocimiento Emerging (2026-08-06, misma sesión que plataformas)
+
+Construye `operaciones` sobre el mecanismo OKF-grafo con la fuente "startup
+nativa de IA" (4 conceptos: `okf_canal_producto_ia`,
+`okf_capa_experta_inteligencia`, `okf_legibilidad_organizacional`,
+`okf_ontologia_empresarial_optimizable` — Kim & Koning, Odewahn, Roberts,
+Dans, `TRABAJO/FUENTES/startup_nativa_de_IA/`). Doble propósito de la
+sesión, explícito desde el arranque: construir el tercer especialista OKF,
+y ejercitar por primera vez con datos reales la ruta de conocimiento
+**Emerging** que el diseño de 2026-08-05 previó (Punto 5, marcador
+`[Conocimiento emergente, no validado]`) pero que ni `escalado` ni
+`plataformas` llegaron a activar por ser ambos `Verified`.
+
+### Importación: dos cambios deliberados sobre la fuente, y una fricción real no anticipada
+
+- **`status: Verified → Emerging`, `verified: true → false`** en los 4
+  ficheros al importar — decisión del usuario, no del código: declarar
+  `Verified` conocimiento sobre "startup nativa de IA" (categoría todavía
+  en formación, sin el mismo nivel de validación que 7 Powers o Platform
+  Scale) mentiría sobre su grado real de certeza, violando la 4ª cláusula
+  del principio rector. Se cambiaron los dos campos, no solo `status`
+  (el que pidió el usuario explícitamente) — dejar `verified: true` junto
+  a `status: Emerging` habría sido la misma clase de inconsistencia interna
+  que se está corrigiendo.
+- **`especialistas: [operaciones]`** añadido a los 4 (la fuente no trae
+  este campo, igual que 7 Powers/Platform Scale al importarse).
+- **Fricción real, no anticipada por el diseño de 2026-08-05**: los 4
+  ficheros originales no numeran sus cabeceras de sección (`## Resumen
+  Ejecutivo`, no `## 1. Resumen Ejecutivo` como sí traían los 9 de 7 Powers
+  y los 10 de Platform Scale) — `extractPromptSections()`
+  (`src/okf/retrieval.ts`) depende del regex `/^##\s+(\d+)\./` para
+  detectar secciones. Sin numerar, las 4 concentraciones habrían llegado
+  al especialista con `texto: ""` (recuperadas pero vacías) sin ningún
+  error visible — degradación silenciosa, no un throw. **Resuelto
+  renumerando las cabeceras al importar** (`## Resumen Ejecutivo` → `## 1.
+  Resumen Ejecutivo`, etc., mismo criterio de "normalización de la copia,
+  no de la fuente" ya aplicado a `---` de apertura en 7 Powers) — **no se
+  tocó `retrieval.ts`**, la fricción se resolvió en los datos, no en el
+  mecanismo. Verificado con un test nuevo contra el cuerpo real
+  post-renumeración (`tests/okf/retrieval.test.ts`), que además atrapó un
+  bug propio: la primera versión del test comprobaba la ausencia de una
+  frase que en realidad pertenecía a la sección 4 (incluida), no a la 3
+  (excluida) — corregido antes de dar el test por bueno.
+- **Segunda fricción menor, mismo origen**: los 4 ficheros traen el `tags`
+  temático anidado dentro de `sources[0]` en vez de como campo de nivel
+  superior (que el schema exige) — probablemente un artefacto de qué sea
+  que generó estos 4 ficheros, distinto del generador de 7 Powers/Platform
+  Scale. Resuelto promoviendo esos mismos valores al `tags` de nivel
+  superior al importar (fidelidad al contenido original, no se inventaron
+  tags nuevos) y retirando el campo anidado. Sin esto el `tags` requerido
+  faltaba y Zod lo habría rechazado — no es un caso "silencioso" como el de
+  las secciones, este sí hace fallar la carga con un mensaje claro.
+
+### Verificación de encaje: el mecanismo no necesitó ningún cambio, otra vez
+
+`loadOkfConcepts()` cargó el grafo combinado de **23 conceptos** (9+10+4)
+sin tocar `loader.ts`/`graph.ts`/`retrieval.ts`/`types.ts`, confirmado con
+33 tests verdes en `tests/okf/` (offline, con los datos reales ya
+normalizados) antes de desplegar nada.
+
+### Topología: 4 nodos, densamente conectados (no sueltos)
+
+A diferencia de los 6 (2 hubs) de `escalado` y los 10 (1 hub dominante) de
+`plataformas`, acá los 4 conceptos **no están sueltos**: 5 de las 6 aristas
+posibles del grafo completo existen (`okf_legibilidad_organizacional` y
+`okf_ontologia_empresarial_optimizable` tienen grado 3 cada uno, conectados
+a los otros 3; solo falta la arista directa `canal_producto_ia` ↔
+`capa_experta_inteligencia`). Con solo 4 nodos (< `maxConcepts=6`), **la
+poda no se ejercita** — desde cualquier ancla, `bfsFromAnchors` devuelve
+siempre el subgrafo completo. Verificado con 2 tests nuevos que recorren
+las 4 anclas posibles.
+
+### `src/specialist/operaciones.ts` (nuevo, 91 líneas)
+
+Mismo patrón que `escalado.ts`/`plataformas.ts`, con una adición real en el
+`SYSTEM_PROMPT`: una regla explícita pidiéndole al modelo que trate estos
+conceptos con más cautela que el resto por ser conocimiento emergente
+("no los presentes con la misma autoridad que un hallazgo consolidado") —
+la única variación de contenido no puramente mecánica entre los 3
+especialistas OKF hasta ahora.
+
+### Enrutamiento: 2 puntos, igual que `plataformas`
+
+`src/graph/nodes/specialist.ts` (+3 líneas, rama `case "operaciones"`) y
+`src/graph/especialistasImplementados.ts` (+3/-3, agrega `"operaciones"` y
+cierra el comentario: ya no queda ningún rol del enum sin implementación
+real). **Confirmado limpio, sin tocar**: `orchestrator.ts` (la frontera de
+`operaciones` ya estaba en el `SYSTEM_PROMPT` desde la sesión de `pmf`,
+2026-07-24, línea 32, nunca usada hasta ahora), `orchestratorModoBase.ts`
+(sin ancla, mismo criterio que `pmf`/`plataformas`), `schemas.ts`/
+`state.ts`/`validator.ts`/`Dockerfile` (ya genéricos desde `escalado`).
+
+### Verificación offline: 51/51
+
+`npx tsc --noEmit` limpio. `npx vitest run`: 51/51 (33 de `tests/okf/` +
+18 del resto de la suite), incluyendo los tests nuevos de topología y de
+la ruta Emerging con datos reales (`buildSourceCitation` sobre
+`okf_legibilidad_organizacional` real, sin override sintético).
+
+### Deploy: limpio, sin el bug de Avast esta vez
+
+Avast seguía pausado de la verificación de `plataformas` en esta misma
+sesión — `flyctl deploy` corrió sin bloqueos. `GET /health` → `200`.
+
+### Verificación ESTRELLA: la ruta Emerging funciona en producción real
+
+Caso real de `operaciones` ("reorganizar el trabajo interno para delegar
+tareas operativas a agentes de IA, hoy nadie documentó quién decide qué ni
+cómo funcionan los procesos") → `approved`, `especialista_usado:
+"operaciones"`, **las 4 fuentes citadas llegaron marcadas
+`[Conocimiento emergente, no validado]`** ante el fundador (ej.
+`"[Conocimiento emergente, no validado] El objetivo no es crear una
+organización nativa de la IA sino una que sea legible para la IA — Iain
+Roberts — Legibilidad Organizacional para la IA"`) — los 4 conceptos
+recuperados y citados, ninguna cita vacía forzada.
+
+**Control en la misma sesión, mismo estándar**: `escalado` (7 Powers,
+`Verified`) reinvocado con una tarea de defensa competitiva →
+`approved`, **6 recomendaciones citando 7 Powers, ninguna con el
+marcador** — confirma el contraste real: el mecanismo no marca todo por
+default, solo lo que efectivamente es `Emerging`. La regla de
+presentación diseñada el 2026-08-05 y nunca antes ejercitada con datos
+reales queda verificada de punta a punta.
+
+### Regresión completa: 4/4 sin cambios de comportamiento
+
+`plataformas` (spam/degradación por escala) → `approved`, citas de
+Platform Scale sin marcador (`Verified`, como corresponde). `ideacion`
+(Cafelibro real, `4df8de99-...`) → `approved`. `mvp`/`pmf` (texto libre) →
+`approved` los dos. Ninguna fuga entre las tres fuentes OKF (7 Powers /
+Platform Scale / startup nativa de IA) en ninguno de los 6 runs de la
+sesión.
+
+**Limpieza**: 6 runs de prueba (`operaciones`, `escalado` control,
+`plataformas`/`ideacion`/`mvp`/`pmf` regresión) borrados al cierre,
+confirmado por conteo (`next_action_runs`: 40 → 34). Las 2 filas reales
+preexistentes (`567fcf09-...`, Cafelibro; `a1975e40-...`, otra startup
+real) verificadas intactas.
+
+### El dato que responde la pregunta de la sesión: el tercer especialista OKF también fue barato, con una fricción real distinta cada vez
+
+| | `escalado` (piloto) | `plataformas` (2º) | `operaciones` (3º) |
+|---|---|---|---|
+| Cambios a `src/okf/` (el mecanismo) | ~250 líneas (se construía) | **0** | **0** |
+| Puntos de enrutamiento tocados | 5 | 2 | 2 |
+| Fichero del especialista | 87 líneas | 86 líneas | 91 líneas (+regla Emerging) |
+| Fricción real de la fuente | Frontmatter sin `---` en 7/9, extensión `.txt`, nombres inconsistentes | Ninguna — la fuente ya venía limpia | Secciones sin numerar (degradación silenciosa) + `tags` mal anidado (falla ruidosa) |
+| Tests offline nuevos/corregidos | 22 nuevos | 3 nuevos + 2 corregidos | 2 nuevos (topología) + cobertura Emerging con datos reales, 5 tests tocados |
+| Verificación real | 3/3 + regresión de 3 | 2/2 + regresión de 4 | 1/1 + control (`escalado`) + regresión de 4 |
+
+**Lectura**: el coste de sumar un especialista OKF sigue sin tocar el
+mecanismo (tercera confirmación consecutiva), pero **cada fuente nueva
+trae su propia fricción de formato distinta** — 7 Powers tuvo frontmatter
+inconsistente, Platform Scale no tuvo ninguna, startup nativa de IA tuvo
+una fricción de contenido (secciones sin numerar) que es justamente el
+tipo de cosa que un mecanismo genérico no puede prevenir del todo: cada
+fuente la genera un proceso distinto (probablemente otro LLM o pipeline),
+y el contrato real es "el `.okf.md` normalizado sigue una convención",
+no "cualquier Markdown funciona". La fricción de las secciones sin
+numerar es la más interesante de las tres sesiones porque **degrada en
+silencio** (texto vacío, no un error) — vale la pena señalarlo como el
+tipo de bug que un test offline contra el cuerpo real (como el que se
+agregó acá) atrapa y una revisión manual del frontmatter no.
+
+### Próximo paso
+
+Con `escalado`, `plataformas` y `operaciones` implementados, los 6 roles
+de la taxonomía (`diseno_expansion_especialistas.md`) tienen especialista
+real: `ideacion`, `mvp`, `pmf` (RAG vectorial) y `escalado`, `plataformas`,
+`operaciones` (OKF-grafo). Pendiente real, ya anotado en la comparación
+diferida de la sesión de `escalado`: decidir si migrar `ideacion`/`mvp`/
+`pmf` a OKF con la evidencia ya recolectada — queda para una sesión aparte,
+como preveía el diseño original. `okf_poder_del_proceso` (7 Powers) sigue
+sin retaggear a `operaciones` — el especialista ya funciona con su fuente
+propia (startup nativa de IA), retaggear esa fuente adicional queda como
+decisión aparte si hace falta más cobertura, no bloqueante.
+
 ## Especialista "plataformas" implementado y desplegado — segunda implementación real del mecanismo OKF-grafo, confirma el coste bajo del diseño genérico (2026-08-06)
 
 Construye el especialista `plataformas` sobre el mecanismo OKF-grafo

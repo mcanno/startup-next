@@ -52,6 +52,34 @@ describe("buildSourceCitation", () => {
   });
 });
 
+describe("extractPromptSections — contra el cuerpo real de okf_legibilidad_organizacional (startup nativa de IA)", () => {
+  it("incluye las secciones 1, 2 y 4, omite la 3 -- confirma que la renumeración de cabeceras al importar (la fuente no traía '1./2./3./4.') quedó bien hecha", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const body = concepts.get("okf_legibilidad_organizacional")!.body;
+
+    const result = extractPromptSections(body);
+
+    expect(result).toContain("## 1. Resumen Ejecutivo");
+    expect(result).toContain("## 2. Definición y Principios Clave");
+    expect(result).toContain("## 4. Casos de Aplicación");
+    expect(result).not.toContain("## 3. Componentes y Estructura");
+    expect(result).not.toContain("Autoridad Vigente y Explícita"); // contenido único de la sección 3, debe faltar
+  });
+});
+
+describe("buildSourceCitation — concepto real Emerging (startup nativa de IA, primera fuente no-Verified del repo)", () => {
+  it("antepone el marcador de conocimiento emergente sin que se lo tengamos que forzar en el test (status real del fichero, no un override sintético)", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const concept = concepts.get("okf_legibilidad_organizacional")!;
+
+    expect(concept.status).toBe("Emerging"); // confirma que el import real dejó el status esperado
+    const citation = buildSourceCitation(concept);
+    expect(citation).toBe(
+      "[Conocimiento emergente, no validado] El objetivo no es crear una organización nativa de la IA sino una que sea legible para la IA — Iain Roberts — Legibilidad Organizacional para la IA",
+    );
+  });
+});
+
 describe("translateOkfFuentes", () => {
   it("traduce concept_id a cita legible, ignora ids no recuperados", () => {
     const retrieved: RetrievedOkfConcept[] = [

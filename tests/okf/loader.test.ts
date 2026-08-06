@@ -79,10 +79,10 @@ describe("parseOkfFile", () => {
   });
 });
 
-describe("loadOkfConcepts — contra los 19 ficheros reales de okf/ (7-powers + platform-scale)", () => {
-  it("carga los 19 conceptos reales de las dos fuentes", () => {
+describe("loadOkfConcepts — contra los 23 ficheros reales de okf/ (7-powers + platform-scale + startup-nativa-ia)", () => {
+  it("carga los 23 conceptos reales de las tres fuentes", () => {
     const concepts = loadOkfConcepts(REAL_OKF_ROOT);
-    expect(concepts.size).toBe(19);
+    expect(concepts.size).toBe(23);
     expect([...concepts.keys()].sort()).toEqual(
       [
         "okf_contraposicionamiento",
@@ -104,6 +104,10 @@ describe("loadOkfConcepts — contra los 19 ficheros reales de okf/ (7-powers + 
         "okf_pila_plataforma",
         "okf_resolucion_huevo_gallina",
         "okf_valor_acumulativo",
+        "okf_canal_producto_ia",
+        "okf_capa_experta_inteligencia",
+        "okf_legibilidad_organizacional",
+        "okf_ontologia_empresarial_optimizable",
       ].sort(),
     );
   });
@@ -126,6 +130,22 @@ describe("loadOkfConcepts — contra los 19 ficheros reales de okf/ (7-powers + 
     }
   });
 
+  it("los 4 conceptos de startup nativa de IA están tageados especialistas: [operaciones] y status: Emerging", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const operacionesIds = [
+      "okf_canal_producto_ia",
+      "okf_capa_experta_inteligencia",
+      "okf_legibilidad_organizacional",
+      "okf_ontologia_empresarial_optimizable",
+    ];
+    for (const id of operacionesIds) {
+      const concept = concepts.get(id);
+      expect(concept?.especialistas).toEqual(["operaciones"]);
+      expect(concept?.status).toBe("Emerging");
+      expect(concept?.verified).toBe(false);
+    }
+  });
+
   it("los 4 conceptos propios de escalado + las 2 raíces están tageados especialistas: [escalado]", () => {
     const concepts = loadOkfConcepts(REAL_OKF_ROOT);
     const escaladoIds = [
@@ -141,7 +161,7 @@ describe("loadOkfConcepts — contra los 19 ficheros reales de okf/ (7-powers + 
     }
   });
 
-  it("los 3 conceptos sin especialista implementado hoy quedan especialistas: []", () => {
+  it("los 3 conceptos de 7 Powers sin retaggear explícitamente quedan especialistas: [] (mvp/plataformas/operaciones ya implementados no cambian esto por sí solos)", () => {
     const concepts = loadOkfConcepts(REAL_OKF_ROOT);
     for (const id of ["okf_economias_de_escala", "okf_economias_de_red", "okf_poder_del_proceso"]) {
       expect(concepts.get(id)?.especialistas).toEqual([]);
