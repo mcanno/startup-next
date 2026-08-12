@@ -1,4 +1,5 @@
 import { runEscaladoSpecialist } from "../../specialist/escalado.js";
+import { runGobernanzaSpecialist } from "../../specialist/gobernanza.js";
 import { runIdeacionSpecialist } from "../../specialist/ideacion.js";
 import { runMvpSpecialist } from "../../specialist/mvp.js";
 import { runOperacionesSpecialist } from "../../specialist/operaciones.js";
@@ -35,6 +36,8 @@ function dispatchSpecialist(
       return runPlataformasSpecialist(accionNext, feedbackValidacion);
     case "operaciones":
       return runOperacionesSpecialist(accionNext, feedbackValidacion);
+    case "gobernanza":
+      return runGobernanzaSpecialist(accionNext, feedbackValidacion);
     case "mvp":
       return runMvpSpecialist(accionNext, feedbackValidacion);
     default:

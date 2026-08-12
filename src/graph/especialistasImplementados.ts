@@ -18,4 +18,5 @@ export const ESPECIALISTAS_IMPLEMENTADOS: ReadonlySet<EspecialistaRole> = new Se
   "escalado",
   "plataformas",
   "operaciones",
+  "gobernanza",
 ]);

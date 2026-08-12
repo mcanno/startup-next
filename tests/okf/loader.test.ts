@@ -79,10 +79,10 @@ describe("parseOkfFile", () => {
   });
 });
 
-describe("loadOkfConcepts — contra los 23 ficheros reales de okf/ (7-powers + platform-scale + startup-nativa-ia)", () => {
-  it("carga los 23 conceptos reales de las tres fuentes", () => {
+describe("loadOkfConcepts — contra los 27 ficheros reales de okf/ (7-powers + platform-scale + startup-nativa-ia + gobernanza)", () => {
+  it("carga los 27 conceptos reales de las cuatro fuentes", () => {
     const concepts = loadOkfConcepts(REAL_OKF_ROOT);
-    expect(concepts.size).toBe(23);
+    expect(concepts.size).toBe(27);
     expect([...concepts.keys()].sort()).toEqual(
       [
         "okf_contraposicionamiento",
@@ -108,6 +108,10 @@ describe("loadOkfConcepts — contra los 23 ficheros reales de okf/ (7-powers + 
         "okf_capa_experta_inteligencia",
         "okf_legibilidad_organizacional",
         "okf_ontologia_empresarial_optimizable",
+        "okf_incorruptible_synthesis",
+        "okf_financial_gravity",
+        "okf_constitutional_governance",
+        "okf_spiritual_holding_company",
       ].sort(),
     );
   });
@@ -143,6 +147,22 @@ describe("loadOkfConcepts — contra los 23 ficheros reales de okf/ (7-powers + 
       expect(concept?.especialistas).toEqual(["operaciones"]);
       expect(concept?.status).toBe("Emerging");
       expect(concept?.verified).toBe(false);
+    }
+  });
+
+  it("los 4 conceptos de gobernanza están tageados especialistas: [gobernanza] y status: Verified", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const gobernanzaIds = [
+      "okf_incorruptible_synthesis",
+      "okf_financial_gravity",
+      "okf_constitutional_governance",
+      "okf_spiritual_holding_company",
+    ];
+    for (const id of gobernanzaIds) {
+      const concept = concepts.get(id);
+      expect(concept?.especialistas).toEqual(["gobernanza"]);
+      expect(concept?.status).toBe("Verified");
+      expect(concept?.verified).toBe(true);
     }
   });
 

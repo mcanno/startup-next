@@ -1,6 +1,62 @@
 # HANDOFF — startup-next (backend)
 
-Última actualización: 2026-08-06.
+Última actualización: 2026-08-12.
+
+## Especialista "gobernanza" implementado — séptimo rol de la taxonomía, cuarta implementación real del mecanismo OKF-grafo (2026-08-12)
+
+Construye `gobernanza` sobre el mecanismo OKF-grafo con la fuente "Incorruptible"
+(4 conceptos: `okf_incorruptible_synthesis`, `okf_financial_gravity`,
+`okf_constitutional_governance`, `okf_spiritual_holding_company` — Eric Ries,
+`TRABAJO/FUENTES/gobernanza/`), reusando el mecanismo tal cual quedó tras
+`operaciones` — **0 líneas tocadas en `src/okf/`, cuarta vez consecutiva**.
+Mismos puntos de enrutamiento que los tres especialistas OKF anteriores
+(`schemas.ts`, `especialistasImplementados.ts`, `specialist.ts`), más una
+frontera nueva en el `SYSTEM_PROMPT` del orquestador (`orchestrator.ts`) que
+distingue `gobernanza` de sus vecinas conceptuales más cercanas (`ideacion`:
+diseño del modelo de negocio; `escalado`: motor de crecimiento). Con esto los
+7 roles de la taxonomía tienen especialista real.
+
+A diferencia de `operaciones` (primer especialista Emerging), los 4 conceptos
+de gobernanza importan con **`status: Verified` / `verified: true` tal como
+vienen en la fuente** — decisión explícita del usuario: *Incorruptible* es un
+libro publicado con ISBN real, no una categoría en formación como "startup
+nativa de IA". Verificado en producción local que ninguna cita de gobernanza
+lleva el marcador `[Conocimiento emergente, no validado]`, contrastado en la
+misma sesión contra `operaciones` (Emerging, con marcador en las 4 citas).
+
+### Importación: misma fricción de numeración que operaciones, una vez más
+
+Los 4 ficheros originales (`TRABAJO/FUENTES/gobernanza/*-v2.md`) repiten la
+fricción real ya vista en `operaciones`: cabeceras de sección sin numerar
+(`## Resumen Ejecutivo`, no `## 1. Resumen Ejecutivo`) — `extractPromptSections()`
+(`src/okf/retrieval.ts`) depende del regex `/^##\s+(\d+)\./`, así que sin
+numerar los 4 conceptos habrían llegado al especialista con `texto: ""`
+(degradación silenciosa, no un throw). Resuelto renumerando las cabeceras al
+importar, mismo criterio de "normalización de la copia, no de la fuente".
+A diferencia de `operaciones`, el `tags` de estos 4 ficheros ya venía a nivel
+superior (no anidado en `sources[0]`) — esa segunda fricción no se repitió.
+Se agregó el campo `especialistas: [gobernanza]` a los 4 (la fuente no lo
+trae, paso normal de importación). Un glitch adicional, propio de este lote,
+no visto antes: `okf_spiritual_holding_company` traía un `\n` literal (texto,
+no salto de línea real) en medio de la sección 2 — normalizado en la copia
+importada.
+
+### Verificación de encaje: el mecanismo no necesitó ningún cambio, otra vez
+
+`loadOkfConcepts()` carga el grafo combinado de **27 conceptos** (9+10+4+4).
+Los 4 de gobernanza forman un grafo completo (K4: las 6 aristas posibles
+existen vía `prerequisites`/`related_concepts` cruzados) — con solo 4 nodos
+(< `maxConcepts`=6) la poda de `bfsFromAnchors` nunca se ejercita, igual que
+en `operaciones`. Suite offline: 57/57 tests (51 previos + 6 nuevos en
+`tests/okf/{graph,loader,retrieval}.test.ts`).
+
+Verificado en producción local con llamadas reales al LLM (Anthropic,
+`ANTHROPIC_API_KEY` local): 1/1 caso de gobernanza (fondo activista presionando
+por vender, el orquestador enruta correctamente a `gobernanza`, recupera los
+4 conceptos con texto poblado, y el especialista devuelve 6 recomendaciones
+citando los 4 ids reales), más control de `escalado` e `ideacion` (ambos
+siguen enrutando correctamente pese al edit compartido en el `SYSTEM_PROMPT`
+del orquestador) y regresión de `operaciones` (marcador Emerging intacto).
 
 ## Especialista "operaciones" implementado y desplegado — tercera implementación real del mecanismo OKF-grafo, primera con conocimiento Emerging (2026-08-06, misma sesión que plataformas)
 

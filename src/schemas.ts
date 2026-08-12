@@ -48,6 +48,7 @@ export const especialistaRoleSchema = z.enum([
   "operaciones",
   "escalado",
   "plataformas",
+  "gobernanza",
 ]);
 export type EspecialistaRole = z.infer<typeof especialistaRoleSchema>;
 

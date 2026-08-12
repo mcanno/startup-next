@@ -39,6 +39,19 @@ describe("inducedSubgraph — contra el grafo real de 7 Powers", () => {
     );
   });
 
+  it("gobernanza induce exactamente los 4 nodos del modelo Incorruptible", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const subgraph = inducedSubgraph(concepts, "gobernanza");
+    expect([...subgraph.keys()].sort()).toEqual(
+      [
+        "okf_incorruptible_synthesis",
+        "okf_financial_gravity",
+        "okf_constitutional_governance",
+        "okf_spiritual_holding_company",
+      ].sort(),
+    );
+  });
+
   it("plataformas induce exactamente los 10 nodos de Platform Scale", () => {
     const concepts = loadOkfConcepts(REAL_OKF_ROOT);
     const subgraph = inducedSubgraph(concepts, "plataformas");
@@ -122,6 +135,39 @@ describe("bfsFromAnchors — subgrafo real de operaciones (4 nodos, densamente c
     const subgraph = inducedSubgraph(concepts, "operaciones");
 
     const result = bfsFromAnchors(subgraph, ["okf_legibilidad_organizacional"], 2, 100);
+    expect(result).toHaveLength(4);
+  });
+});
+
+describe("bfsFromAnchors — subgrafo real de gobernanza (4 nodos, grafo completo)", () => {
+  // A diferencia de operaciones (5 de las 6 aristas posibles), acá las 6
+  // aristas existen: los 3 conceptos de nivel (financial_gravity,
+  // constitutional_governance, spiritual_holding_company) se referencian
+  // entre sí de a pares (related_concepts o prerequisites cruzados) y la
+  // síntesis los referencia a los 3 -- grafo completo K4. Con solo 4 nodos
+  // (< maxConcepts=6), la poda nunca se ejercita acá, igual que operaciones.
+  it("desde cualquier ancla, profundidad 1 ya alcanza los 4 nodos (grafo completo)", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const subgraph = inducedSubgraph(concepts, "gobernanza");
+
+    for (const anchor of [...subgraph.keys()]) {
+      const result = bfsFromAnchors(subgraph, [anchor], 1, 6);
+      expect(result.sort()).toEqual(
+        [
+          "okf_incorruptible_synthesis",
+          "okf_financial_gravity",
+          "okf_constitutional_governance",
+          "okf_spiritual_holding_company",
+        ].sort(),
+      );
+    }
+  });
+
+  it("nunca cruza a un concepto de otra fuente (7 Powers, Platform Scale, startup nativa de IA)", () => {
+    const concepts = loadOkfConcepts(REAL_OKF_ROOT);
+    const subgraph = inducedSubgraph(concepts, "gobernanza");
+
+    const result = bfsFromAnchors(subgraph, ["okf_incorruptible_synthesis"], 2, 100);
     expect(result).toHaveLength(4);
   });
 });
