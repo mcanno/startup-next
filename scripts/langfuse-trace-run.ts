@@ -27,7 +27,11 @@
 // metadata de calidad se envía (cortafuegos de confidencialidad, §4 del
 // diseño) -- cuando haya casos reales, basta con que ES_PRUEBA sea false acá.
 //
-// Uso: npx tsx scripts/langfuse-trace-run.ts
+// Uso: npx tsx scripts/langfuse-trace-run.ts ["situacion a probar"]
+//   Sin argumento: corre la situación por defecto de ideacion-001 (abajo).
+//   Con argumento: corre esa situación en su lugar -- útil para capturar
+//   trazas de otros especialistas (p. ej. operaciones, para probar la
+//   dimensión 6 del juez -- subpaso 4 de diseno_juez.md).
 
 import { config } from "dotenv";
 config({ path: ".env.local" });
@@ -60,9 +64,10 @@ function getVersionSistema(): string {
 
 // Misma situación real de ideacion-001 (ver sesión de diseño de casos de
 // prueba) -- caso simple, de un solo ciclo, ideal para confirmar el árbol
-// de spans sin ruido de reintentos.
-const SITUACION_PRUEBA =
+// de spans sin ruido de reintentos. Overridable por argv[2] (ver Uso arriba).
+const SITUACION_PRUEBA_DEFAULT =
   "Tengo una idea para una app de gestión de gastos para autónomos. Estoy convencido de que la necesitan. Aún no he hablado con ninguno ni he construido nada. ¿Cuál es mi siguiente paso?";
+const SITUACION_PRUEBA = process.argv[2] ?? SITUACION_PRUEBA_DEFAULT;
 
 const ES_PRUEBA = true;
 
@@ -125,19 +130,31 @@ function buildHealthMetadata(nodeName: string, partial: Partial<StartupNextState
 // esto cuando contenidoDeCalidadPermitido(esPrueba) sea true -- esta función
 // no vuelve a chequear el cortafuegos, para que la regla viva en un único
 // sitio (src/observability/confidencialidad.ts).
+//
+// Un especialista RAG deja retrievedConcepts en [] y uno OKF deja
+// retrievedChunks en [], nunca ambos poblados a la vez (mismo invariante que
+// checkCalidadYFuentes/translateFuentes en validator.ts) -- por eso hace
+// falta resolver la cita/texto contra los DOS mecanismos: para OKF,
+// sourceCitation ya trae antepuesto el marcador "[Conocimiento emergente,
+// no validado]" cuando corresponde (buildSourceCitation, src/okf/
+// retrieval.ts), que es justo lo que la dimensión 6 del juez necesita ver.
 function buildQualityMetadata(nodeName: string, partial: Partial<StartupNextStateType>): Record<string, unknown> {
   if (nodeName === "specialist") {
     const chunksById = new Map((partial.retrievedChunks ?? []).map((chunk) => [chunk.chunkId, chunk]));
+    const conceptsById = new Map((partial.retrievedConcepts ?? []).map((concept) => [concept.conceptId, concept]));
     return {
       respuesta: (partial.borrador?.recomendaciones ?? []).map((r) => ({
         titulo: r.titulo,
         detalle: r.detalle,
-        fuentes: r.fuentes.map((chunkId) => {
-          const chunk = chunksById.get(chunkId);
+        fuentes: r.fuentes.map((id) => {
+          const chunk = chunksById.get(id);
+          const concept = conceptsById.get(id);
           return {
-            fuente_chunk_id: chunkId,
-            fuente_cita: chunk ? [chunk.libro, chunk.capitulo, chunk.seccion].filter(Boolean).join(" — ") : undefined,
-            fuente_texto: chunk?.texto,
+            fuente_chunk_id: id,
+            fuente_cita: chunk
+              ? [chunk.libro, chunk.capitulo, chunk.seccion].filter(Boolean).join(" — ")
+              : concept?.sourceCitation,
+            fuente_texto: chunk?.texto ?? concept?.texto,
           };
         }),
       })),
@@ -152,7 +169,8 @@ async function main() {
     console.error(
       "Faltan LANGFUSE_PUBLIC_KEY y/o LANGFUSE_SECRET_KEY en .env.local -- completalas antes de correr este script.",
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const spanProcessor = new LangfuseSpanProcessor({ publicKey, secretKey, baseUrl, exportMode: "immediate" });
@@ -227,7 +245,9 @@ async function main() {
   } catch (err) {
     console.error("Fallo instrumentando la ejecución:", err);
     await spanProcessor.shutdown().catch(() => {});
-    process.exit(1);
+    // process.exitCode, no exit(1) -- ver nota en scripts/langfuse-judge.ts
+    // sobre la carrera con el keep-alive de fetch en Windows/Node 24.
+    process.exitCode = 1;
   }
 }
 
