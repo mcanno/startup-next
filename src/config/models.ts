@@ -100,6 +100,23 @@ export type ChatModelOptions = {
 // supported for this model."; omitir el campo funciona limpio. Si algún
 // día un modelo Gemini (no Gemma) se usa acá, esto hay que revisarlo de
 // nuevo contra ese modelo puntual, no asumir que aplica igual.
+const JUDGE_MODEL_DEFAULT = "gemini-2.5-pro";
+
+// El juez (scripts/langfuse-judge-*.ts, diseno_juez.md) no es un nodo del
+// grafo -- corre desacoplado, leyendo trazas ya capturadas de Langfuse -- pero
+// reusa el mismo patrón de config perezosa y el mismo getChatModel() que el
+// resto. A diferencia de los nodos de arriba, el default es Google (Gemini),
+// no Anthropic: el diseño pide un juez de otra familia que el generador
+// (Sonnet) para evitar el sesgo de autoafirmación (diseno_juez.md, sección 5).
+export function getJudgeModelConfig(): ModelConfig {
+  const provider: Provider = process.env.JUDGE_PROVIDER === "anthropic" ? "anthropic" : "google";
+  return {
+    provider,
+    model: process.env.JUDGE_MODEL || (provider === "google" ? JUDGE_MODEL_DEFAULT : undefined),
+    apiKey: process.env.JUDGE_API_KEY,
+  };
+}
+
 export function getChatModel(config: ModelConfig, opts: ChatModelOptions) {
   if (!config.model) throw new Error(`Modelo no configurado para provider "${config.provider}"`);
 
